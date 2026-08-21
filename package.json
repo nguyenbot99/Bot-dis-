@@ -1,35 +1,22 @@
 {
   "name": "ziplayer-discord-bot",
   "version": "1.0.0",
-  "description": "Discord Music Bot - YouTube, Spotify, SoundCloud, TTS",
+  "description": "Discord Music Bot",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start": "node index.js"
   },
-  "keywords": [
-    "discord",
-    "music",
-    "bot",
-    "ziplayer",
-    "youtube",
-    "spotify",
-    "soundcloud"
-  ],
+  "keywords": ["discord", "music", "bot"],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "discord.js": "^14.15.3",
+    "discord.js": "^14.15.0",
     "@discordjs/voice": "^0.16.1",
-    "ziplayer": "latest",
-    "@ziplayer/plugin": "latest",
-    "@ziplayer/extension": "latest",
-    "dotenv": "^16.4.5",
-    "opusscript": "^0.0.8"
-  },
-  "devDependencies": {
-    "nodemon": "^3.1.4"
+    "ziplayer": "^1.0.0",
+    "@ziplayer/plugin": "^1.0.0",
+    "@ziplayer/extension": "^1.0.0",
+    "dotenv": "^16.4.5"
   },
   "engines": {
     "node": "18.x"
