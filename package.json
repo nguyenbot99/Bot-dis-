@@ -1,0 +1,33 @@
+{
+  "name": "ziplayer-discord-bot",
+  "version": "1.0.0",
+  "description": "A comprehensive Discord music bot with audio filters, TTS, lyrics, and voice commands",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "discord",
+    "music",
+    "bot",
+    "ziplayer",
+    "audio",
+    "filters"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.0.0",
+    "@discordjs/voice": "^0.16.0",
+    "ziplayer": "latest",
+    "@ziplayer/plugin": "latest",
+    "@ziplayer/extension": "latest",
+    "@ziplayer/infinity": "latest",
+    "dotenv": "^16.0.0",
+    "opusscript": "^0.0.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  }
+}
