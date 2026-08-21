@@ -5,13 +5,14 @@ import {
   Client,
   GatewayIntentBits,
   EmbedBuilder,
-  ChannelType,
 } from "discord.js";
 import { PlayerManager } from "ziplayer";
 import {
   YouTubePlugin,
   SpotifyPlugin,
+  SoundCloudPlugin,
 } from "@ziplayer/plugin";
+import { lyricsExt } from "@ziplayer/extension";
 
 const TOKEN = process.env.DISCORD_TOKEN;
 
@@ -33,11 +34,19 @@ const client = new Client({
 
 // ==================== MANAGER ====================
 
+const lrc = new lyricsExt(null, {
+  includeSynced: true,
+  autoFetchOnTrackStart: true,
+  sanitizeTitle: true,
+});
+
 const manager = new PlayerManager({
   plugins: [
     new YouTubePlugin(),
     new SpotifyPlugin(),
+    new SoundCloudPlugin(),
   ],
+  extensions: [lrc],
   autoCleanup: true,
   extractorTimeout: 20000,
   enableSearchCache: true,
@@ -66,8 +75,21 @@ manager.on("trackStart", (player, track) => {
       });
     }
 
+    if (track.requestedBy) {
+      embed.addFields({
+        name: "Yêu Cầu Bởi",
+        value: `<@${track.requestedBy}>`,
+        inline: true,
+      });
+    }
+
     ch.send({ embeds: [embed] }).catch(() => {});
   }
+});
+
+manager.on("queueAdd", (player, track) => {
+  const ch = player?.userdata?.ch;
+  if (ch) ch.send(`✅ Đã thêm: **${track.title}**`).catch(() => {});
 });
 
 manager.on("playerError", (player, error) => {
@@ -76,10 +98,36 @@ manager.on("playerError", (player, error) => {
   if (ch) ch.send(`❌ Lỗi: ${error.message}`).catch(() => {});
 });
 
+manager.on("lyricsChange", async (player, track, result) => {
+  if (result.current) {
+    const msg = [
+      result.previous ? `Trước: ${result.previous}` : null,
+      `Hiện tại: **${result.current}**`,
+      result.next ? `Tiếp: ${result.next}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      if (player?.userdata?.lrcmess) {
+        await player.userdata.lrcmess.edit(msg).catch(() => {});
+      } else {
+        const lrcmess = await player?.userdata?.ch?.send({
+          content: msg,
+        });
+        if (lrcmess) player.userdata.lrcmess = lrcmess;
+      }
+    } catch (e) {
+      console.log("Lyrics error:", e.message);
+    }
+  }
+});
+
 // ==================== DISCORD CLIENT ====================
 
 client.once("ready", () => {
   console.log(`✅ Bot: ${client.user.tag}`);
+  console.log("🎵 YouTube • Spotify • SoundCloud • Lyrics");
   client.user.setActivity("/help", { type: "LISTENING" });
 });
 
@@ -97,6 +145,7 @@ const getPlayer = async (guildId, ch) => {
       volume: 100,
       leaveOnEmpty: true,
       leaveOnEnd: true,
+      leaveTimeout: 60000,
     });
   }
   p.userdata = p.userdata || {};
@@ -115,7 +164,7 @@ client.on("messageCreate", async (msg) => {
   const vc = msg.member?.voice?.channel;
 
   try {
-    // PLAY
+    // PLAY - YouTube/Spotify
     if (cmd === "play" || cmd === "p") {
       if (!vc) return msg.reply("❌ Vào voice");
       const q = args.join(" ");
@@ -137,6 +186,37 @@ client.on("messageCreate", async (msg) => {
         const t = p.currentTrack;
         if (t) {
           r.edit(`▶️ **${t.title}**`).catch(() => {});
+        } else {
+          r.edit("❌ Không tìm thấy").catch(() => {});
+        }
+      } catch (e) {
+        r.edit(`❌ ${e.message}`).catch(() => {});
+      }
+    }
+
+    // SCPLAY - SoundCloud
+    else if (cmd === "scplay" || cmd === "sc") {
+      if (!vc) return msg.reply("❌ Vào voice");
+      const q = args.join(" ");
+      if (!q) return msg.reply("❌ `/scplay <bài hát>`");
+
+      const p = await getPlayer(msg.guildId, msg.channel);
+      if (!p.connection) {
+        try {
+          await p.connect(vc);
+        } catch {
+          return msg.reply("❌ Không vào được voice");
+        }
+      }
+
+      const r = await msg.reply("☁️ Tìm SoundCloud...");
+      try {
+        const query = q.startsWith("http") ? q : `scsearch:${q}`;
+        await p.play(query, msg.author.id);
+        await new Promise((x) => setTimeout(x, 1000));
+        const t = p.currentTrack;
+        if (t) {
+          r.edit(`▶️ **${t.title}** (SoundCloud)`).catch(() => {});
         } else {
           r.edit("❌ Không tìm thấy").catch(() => {});
         }
@@ -219,11 +299,25 @@ client.on("messageCreate", async (msg) => {
       const p = manager.get(msg.guildId);
       if (!p?.currentTrack) return msg.reply("❌ Không có nhạc");
       const t = p.currentTrack;
+      const progress = p.getProgressBar?.({ size: 15 }) || "Unknown";
+      const time = p.getTime?.();
       const embed = new EmbedBuilder()
         .setColor("#FF0000")
         .setTitle("🎵 Đang Phát")
         .setDescription(`**${t.title}**`)
-        .setThumbnail(t.thumbnail);
+        .setThumbnail(t.thumbnail)
+        .setURL(t.url)
+        .addFields({
+          name: "Tiến Độ",
+          value: `\`${progress}\`\n${time?.formatted?.current || "00:00"} / ${
+            time?.formatted?.total || "00:00"
+          }`,
+        })
+        .addFields({
+          name: "Người Phát",
+          value: `<@${t.requestedBy}>`,
+          inline: true,
+        });
       msg.reply({ embeds: [embed] }).catch(() => {});
     }
 
@@ -232,12 +326,83 @@ client.on("messageCreate", async (msg) => {
       const p = manager.get(msg.guildId);
       if (!p?.currentTrack) return msg.reply("❌ Không có nhạc");
       const list = (p.upcomingTracks || [])
-        .slice(0, 5)
+        .slice(0, 10)
         .map((t, i) => `${i + 1}. ${t.title}`)
         .join("\n") || "Trống";
-      msg.reply(`🎵 **${p.currentTrack.title}**\n\n${list}`).catch(
-        () => {}
-      );
+      const embed = new EmbedBuilder()
+        .setColor("#FF0000")
+        .setTitle("🎵 Hàng Đợi")
+        .addFields({
+          name: "Đang Phát",
+          value: `**${p.currentTrack.title}**\nPhát bởi: <@${p.currentTrack.requestedBy}>`,
+        })
+        .addFields({
+          name: `Tiếp Theo (${p.queueSize || 0})`,
+          value: list,
+        });
+      msg.reply({ embeds: [embed] }).catch(() => {});
+    }
+
+    // LOOP
+    else if (cmd === "loop") {
+      const p = manager.get(msg.guildId);
+      if (!p) return msg.reply("❌ Không có nhạc");
+      const m = args[0]?.toLowerCase() || "off";
+      if (!["off", "track", "queue"].includes(m))
+        return msg.reply("❌ off/track/queue");
+      p.loop(m);
+      const names = { off: "Tắt", track: "Lặp bài", queue: "Lặp hàng đợi" };
+      msg.reply(`🔁 ${names[m]}`).catch(() => {});
+    }
+
+    // SHUFFLE
+    else if (cmd === "shuffle") {
+      const p = manager.get(msg.guildId);
+      if (!p) return msg.reply("❌ Không có nhạc");
+      p.shuffle();
+      msg.reply("🔀 Xáo").catch(() => {});
+    }
+
+    // AUTOPLAY
+    else if (cmd === "autoplay") {
+      const p = manager.get(msg.guildId);
+      if (!p) return msg.reply("❌ Không có nhạc");
+      try {
+        if (p.queue && typeof p.queue.autoPlay === "function") {
+          const current = p.queue.autoPlay?.();
+          p.queue.autoPlay(!current);
+          msg.reply(`🔁 Autoplay: **${!current ? "Bật" : "Tắt"}**`).catch(
+            () => {}
+          );
+        } else {
+          msg.reply("❌ Không hỗ trợ").catch(() => {});
+        }
+      } catch (e) {
+        msg.reply("❌ " + e.message).catch(() => {});
+      }
+    }
+
+    // SEARCH
+    else if (cmd === "search") {
+      const q = args.join(" ");
+      if (!q) return msg.reply("❌ `/search <bài hát>`");
+      try {
+        const results = await manager.search(q);
+        if (!results || results.length === 0)
+          return msg.reply("❌ Không tìm thấy");
+        const embed = new EmbedBuilder()
+          .setColor("#FF0000")
+          .setTitle(`🔍 Kết Quả: "${q}"`)
+          .setDescription(
+            results
+              .slice(0, 10)
+              .map((t, i) => `${i + 1}. ${t.title}`)
+              .join("\n")
+          );
+        msg.reply({ embeds: [embed] }).catch(() => {});
+      } catch (e) {
+        msg.reply(`❌ ${e.message}`).catch(() => {});
+      }
     }
 
     // HELP
@@ -246,23 +411,33 @@ client.on("messageCreate", async (msg) => {
         .setColor("#FF0000")
         .setTitle("🎵 BOT NHẠC")
         .addFields({
-          name: "Phát",
+          name: "🎵 Phát Nhạc",
           value:
-            "`/play <tên>` - Phát\n" +
+            "`/play <tên>` - YouTube/Spotify\n" +
+            "`/scplay <tên>` - SoundCloud\n" +
             "`/pause` - Tạm dừng\n" +
             "`/resume` - Phát\n" +
             "`/skip` - Bỏ qua\n" +
             "`/stop` - Dừng",
         })
         .addFields({
-          name: "Khác",
+          name: "📜 Hàng Đợi",
           value:
-            "`/queue` - Hàng đợi\n" +
+            "`/queue` - Xem hàng\n" +
             "`/np` - Bài đang phát\n" +
-            "`/volume` - Âm lượng\n" +
-            "`/join` - Vào\n" +
-            "`/leave` - Rời",
-        });
+            "`/loop [off|track|queue]` - Lặp\n" +
+            "`/shuffle` - Xáo\n" +
+            "`/autoplay` - Phát tự động",
+        })
+        .addFields({
+          name: "⚙️ Khác",
+          value:
+            "`/volume <0-200>` - Âm lượng\n" +
+            "`/search <tên>` - Tìm kiếm\n" +
+            "`/join` - Vào voice\n" +
+            "`/leave` - Rời voice",
+        })
+        .setFooter({ text: "🎤 Lyrics: Cập nhật tự động khi phát bài" });
       msg.reply({ embeds: [embed] }).catch(() => {});
     }
 
@@ -271,6 +446,7 @@ client.on("messageCreate", async (msg) => {
     }
   } catch (error) {
     console.error("Error:", error);
+    msg.reply("❌ Lỗi").catch(() => {});
   }
 });
 
