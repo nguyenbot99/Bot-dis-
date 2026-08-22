@@ -46,12 +46,14 @@ const lavalink = new lavalinkExt(null, {
 
 const voice = new voiceExt(null, { client, lang: "vi-VN" });
 
-// --- 4. PLAYER MANAGER SETUP ---
+// --- 4. PLAYER MANAGER SETUP (ĐÃ SỬA SOUNDCLOUD) ---
 const manager = new PlayerManager({
 	plugins: [
 		new TTSPlugin({ defaultLang: "vi" }),
 		new YouTubePlugin(),
-		new SoundCloudPlugin(),
+		new SoundCloudPlugin({
+			clientId: "iZ29y3TWP72qogVFi2a1Lz33xI4oA1yK", // Client ID cố định giúp tránh lỗi scrape
+		}),
 		new SpotifyPlugin(),
 	],
 	extensions: [lrc, voice, lavalink],
