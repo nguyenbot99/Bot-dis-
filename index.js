@@ -96,7 +96,8 @@ const commands = [
 	new SlashCommandBuilder().setName("resume").setDescription("Tiếp tục phát nhạc"),
 	new SlashCommandBuilder().setName("stop").setDescription("Dừng phát nhạc và dọn dẹp hàng chờ"),
 	
-	// Audio Filters
+	// Lyrics & Filters
+	new SlashCommandBuilder().setName("lyrics").setDescription("Xem lời bài hát đang phát hoặc tìm theo tên bài").addStringOption(o => o.setName("query").setDescription("Tên bài hát (để trống để lấy bài đang phát)")),
 	new SlashCommandBuilder().setName("filter").setDescription("Áp dụng hoặc xem danh sách filter âm thanh").addStringOption(o => o.setName("name").setDescription("Tên filter (để trống để xem danh sách)")),
 	new SlashCommandBuilder().setName("removefilter").setDescription("Gỡ bộ lọc âm thanh").addStringOption(o => o.setName("name").setDescription("Tên filter cần gỡ").setRequired(true)),
 	new SlashCommandBuilder().setName("clearfilters").setDescription("Xóa toàn bộ bộ lọc âm thanh đang áp dụng"),
@@ -139,7 +140,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	const { commandName, options, member, guild, channel, user } = interaction;
 
-	// Xử lý hoãn phản hồi (Lệnh /tts ẩn hoàn toàn, các lệnh khác hiển thị bình thường)
+	// Xử lý hoãn phản hồi (/tts ẩn hoàn toàn)
 	try {
 		if (commandName === "tts") {
 			await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -152,7 +153,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	let player = manager.get(guild.id);
 
-	// --- 1. PLAYBACK (CHỈ DÙNG SOUNDCLOUD) ---
+	// --- 1. PLAYBACK ---
 	if (commandName === "play" || commandName === "search") {
 		let rawQuery = options.getString("query");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
@@ -162,22 +163,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				player = await manager.create(guild.id, { 
 					userdata: { channel }, 
 					selfDeaf: true,
-					extensions: ["lavalinkExt"] 
+					extensions: ["lavalinkExt", "lyricsExt"] 
 				});
 			}
 			if (!player.connection) await player.connect(member.voice.channel);
 
 			let res = null;
 
-			// Nếu là URL SoundCloud trực tiếp
 			if (rawQuery.includes("soundcloud.com")) {
 				res = await player.play(rawQuery, user.id).catch(() => null);
 			} else {
-				// Tất cả tìm kiếm bằng tên đều dùng SoundCloud (scsearch)
 				res = await player.play(`scsearch:${rawQuery}`, user.id).catch(() => null);
 			}
 
-			if (!res) return interaction.editReply("❌ Không tìm thấy bài hát trên SoundCloud! Hãy thử từ khóa khác.");
+			if (!res) return interaction.editReply("❌ Không tìm thấy bài hát trên SoundCloud!");
 
 			if (player.currentTrack) player.currentTrack.requestedBy = user.id;
 			const title = res.title || res.name || rawQuery;
@@ -190,7 +189,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	} else if (commandName === "tts") {
 		const text = options.getString("text");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
-		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true, extensions: ["lavalinkExt"] });
+		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true, extensions: ["lavalinkExt", "lyricsExt"] });
 		if (!player.connection) await player.connect(member.voice.channel);
 
 		await player.play(`tts:${text}`, user.id);
@@ -216,7 +215,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			return interaction.editReply("👋 Đã dừng nhạc và rời kênh!");
 		}
 
-	// --- 1.5 AUDIO FILTERS ---
+	// --- 1.5 LYRICS (LỜI BÀI HÁT) ---
+	} else if (commandName === "lyrics") {
+		const query = options.getString("query");
+		let targetTrack = query;
+
+		if (!targetTrack) {
+			if (!player || !player.currentTrack) {
+				return interaction.editReply("❌ Không có bài hát nào đang phát và bạn cũng chưa nhập tên bài hát!");
+			}
+			targetTrack = player.currentTrack.title || player.currentTrack.name;
+		}
+
+		try {
+			const lyricsData = await lrc.get(targetTrack);
+			
+			if (!lyricsData || !lyricsData.lyrics) {
+				return interaction.editReply(`❌ Không tìm thấy lời bài hát cho: **${targetTrack}**`);
+			}
+
+			const lyricsText = lyricsData.lyrics.length > 3900 ? lyricsData.lyrics.substring(0, 3900) + "..." : lyricsData.lyrics;
+
+			const embed = new EmbedBuilder()
+				.setColor("#ff5500")
+				.setTitle(`📜 Lời bài hát: ${lyricsData.title || targetTrack}`)
+				.setDescription(lyricsText)
+				.setFooter({ text: `Nguồn: ${lyricsData.source || "Genius/Musixmatch"}` });
+
+			return interaction.editReply({ embeds: [embed] });
+		} catch (err) {
+			console.error("Lyrics Error:", err);
+			return interaction.editReply("❌ Có lỗi xảy ra khi tra cứu lời bài hát!");
+		}
+
+	// --- 1.6 AUDIO FILTERS ---
 	} else if (commandName === "filter") {
 		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
 		const filterName = options.getString("name");
@@ -305,7 +337,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	} else if (commandName === "join") {
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
-		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true, extensions: ["lavalinkExt"] });
+		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true, extensions: ["lavalinkExt", "lyricsExt"] });
 		await player.connect(member.voice.channel);
 		return interaction.editReply(`🔊 Đã tham gia kênh thoại **${member.voice.channel.name}**`);
 
@@ -323,6 +355,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				"**Phát Nhạc (SoundCloud)**\n" +
 				"`/play <query>` - Phát bài hát từ từ khóa hoặc link SoundCloud\n" +
 				"`/tts <text>` - Đọc văn bản bằng giọng nói (Chỉ riêng bạn thấy)\n" +
+				"`/lyrics [query]` - Xem lời bài hát đang phát hoặc tìm theo tên\n" +
 				"`/skip` - Bỏ qua bài hát đang phát\n" +
 				"`/pause` - Tạm dừng phát nhạc\n" +
 				"`/resume` - Tiếp tục phát nhạc\n" +
