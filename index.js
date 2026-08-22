@@ -2,7 +2,7 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { YouTubePlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
+const { SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
 const { voiceExt, lyricsExt, lavalinkExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
@@ -26,22 +26,10 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS & EXTENSIONS TỐI ƯU ---
-// Đọc cookie từ env để bypass YouTube IP block nếu có
-let ytCookies;
-try {
-	ytCookies = process.env.YOUTUBE_COOKIE ? JSON.parse(process.env.YOUTUBE_COOKIE) : undefined;
-} catch (e) {
-	console.error("⚠️ Không thể đọc YOUTUBE_COOKIE từ file .env/Environment Variables:", e.message);
-}
-
+// --- CẤU HÌNH PLUGINS & EXTENSIONS ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
 	new SpotifyPlugin({ emitError: false }),
-	new YouTubePlugin({
-		playerClients: ["ANDROID", "IOS"],
-		cookies: ytCookies,
-	}),
 ];
 
 const lrc = new lyricsExt({ includeSynced: true, autoFetchOnTrackStart: true, sanitizeTitle: true });
@@ -63,11 +51,13 @@ const lavalink = new lavalinkExt(null, {
 	debug: false,
 });
 
+// TẮT HOÀN TOÀN TRÍCH XUẤT YOUTUBE TRONG PLAYER MANAGER
 const manager = new PlayerManager({
 	plugins: plugins,
 	extensions: [lrc, voice, lavalink],
 	autoCleanup: true,
 	extractorTimeout: 90000,
+	disabledExtractors: ["youtube", "youtube-dl", "sabrdl", "YouTubePlugin"], // Chặn ZiPlayer tự gọi YouTube
 });
 
 // --- HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN ---
@@ -151,10 +141,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	const { commandName, options, member, guild, channel, user } = interaction;
 
-	// Xử lý hoãn phản hồi (Ephemeral riêng cho TTS, công khai cho các lệnh còn lại)
+	// Xử lý hoãn phản hồi
 	try {
 		if (commandName === "tts") {
-			await interaction.deferReply({ flags: 64 }); // Ẩn tin nhắn phản hồi chỉ cho riêng người dùng
+			await interaction.deferReply({ flags: 64 });
 		} else {
 			await interaction.deferReply();
 		}
@@ -181,33 +171,31 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 			let res = null;
 
-			// 1. Nếu dán Link YouTube, tự động trích xuất tên bài hát để tìm qua Spotify
+			// 1. Tự động chuyển đổi link YouTube thành từ khóa tìm kiếm SoundCloud
 			if (rawQuery.includes("youtube.com") || rawQuery.includes("youtu.be")) {
 				const cleanName = rawQuery.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
-				res = await player.play(`spsearch:${cleanName}`, user.id).catch(() => null);
-			} else if (!rawQuery.startsWith("http")) {
-				// 2. Tìm kiếm từ khóa mặc định qua Spotify
-				res = await player.play(`spsearch:${rawQuery}`, user.id).catch(() => null);
-			}
-
-			// 3. Fallback: Nếu Spotify thất bại, tìm kiếm qua SoundCloud bằng Lavalink (Tránh YouTube IP Block)
-			if (!res && !rawQuery.startsWith("http")) {
+				res = await player.play(`scsearch:${cleanName}`, user.id).catch(() => null);
+			} 
+			// 2. Nếu tìm từ khóa, ưu tiên SoundCloud qua Lavalink
+			else if (!rawQuery.startsWith("http")) {
 				res = await player.play(`scsearch:${rawQuery}`, user.id).catch(() => null);
-			}
-
-			// 4. Nếu vẫn không được mới thử phát query gốc
-			if (!res) {
+				if (!res) {
+					res = await player.play(`spsearch:${rawQuery}`, user.id).catch(() => null);
+				}
+			} 
+			// 3. Nếu là URL Spotify/SoundCloud trực tiếp
+			else {
 				res = await player.play(rawQuery, user.id).catch(() => null);
 			}
 
-			if (!res) return interaction.editReply("❌ Không thể lấy bài hát! Hãy thử gõ **tên bài hát** (VD: `/play Chúng ta của tương lai`) hoặc dùng link Spotify.");
+			if (!res) return interaction.editReply("❌ Không thể lấy bài hát! Vui lòng dùng tên bài hát hoặc link Spotify / SoundCloud.");
 
 			if (player.currentTrack) player.currentTrack.requestedBy = user.id;
 			const title = res.title || res.name || rawQuery;
 			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
-			return interaction.editReply("❌ Lỗi kết nối nguồn nhạc! Vui lòng dùng tên bài hát hoặc link Spotify.");
+			return interaction.editReply("❌ Lỗi kết nối nguồn nhạc! Vui lòng thử lại với tên bài hát.");
 		}
 
 	} else if (commandName === "tts") {
@@ -344,7 +332,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			.setTitle("🎵 Bảng Hướng Dẫn - Music Bot")
 			.setDescription(
 				"**Phát Nhạc (Playback)**\n" +
-				"`/play <query>` - Phát bài hát từ từ khóa hoặc link\n" +
+				"`/play <query>` - Phát bài hát từ từ khóa hoặc link (Spotify, SoundCloud)\n" +
 				"`/tts <text>` - Đọc văn bản bằng giọng nói (chỉ riêng bạn thấy)\n" +
 				"`/skip` - Bỏ qua bài hát đang phát\n" +
 				"`/pause` - Tạm dừng phát nhạc\n" +
