@@ -1,9 +1,9 @@
 require("dotenv").config();
 const http = require("http");
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
-const { voiceExt, lyricsExt, lavalinkExt } = require("@ziplayer/extension");
+const { TTSPlugin } = require("@ziplayer/plugin");
+const { lyricsExt, lavalinkExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
 process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
@@ -26,16 +26,14 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS & EXTENSIONS ---
+// --- CẤU HÌNH PLUGINS & EXTENSIONS (CHỈ GIỮ TTS & SOUNDCLOUD) ---
 const plugins = [
-	new TTSPlugin({ defaultLang: "vi" }),
-	new SpotifyPlugin({ emitError: false }),
+	new TTSPlugin({ defaultLang: "vi" })
 ];
 
 const lrc = new lyricsExt({ includeSynced: true, autoFetchOnTrackStart: true, sanitizeTitle: true });
-const voice = new voiceExt({ lang: "vi-VN" });
 
-// Khởi tạo Lavalink Extension
+// Khởi tạo Lavalink Extension (Chuyên trách SoundCloud)
 const lavalink = new lavalinkExt(null, {
 	nodes: [
 		{
@@ -51,13 +49,13 @@ const lavalink = new lavalinkExt(null, {
 	debug: false,
 });
 
-// TẮT HOÀN TOÀN TRÍCH XUẤT YOUTUBE TRONG PLAYER MANAGER
+// Tắt hoàn toàn các nguồn trích xuất khác
 const manager = new PlayerManager({
 	plugins: plugins,
-	extensions: [lrc, voice, lavalink],
+	extensions: [lrc, lavalink],
 	autoCleanup: true,
 	extractorTimeout: 90000,
-	disabledExtractors: ["youtube", "youtube-dl", "sabrdl", "YouTubePlugin"], // Chặn ZiPlayer tự gọi YouTube
+	disabledExtractors: ["youtube", "youtube-dl", "sabrdl", "YouTubePlugin", "spotify"],
 });
 
 // --- HÀM KIỂM TRA QUYỀN ĐIỀU KHIỂN ---
@@ -73,7 +71,7 @@ const canControl = (interaction, player) => {
 // --- EVENTS ---
 manager.on("trackStart", (player, track) => {
 	const title = track?.title || track?.name || "Bài hát";
-	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
+	player.userdata?.channel?.send(`▶ Đang phát (SoundCloud): **${title}**`).catch(() => null);
 });
 
 manager.on("filterApplied", (player, filter) => {
@@ -91,8 +89,8 @@ manager.on("filtersCleared", (player) => {
 // --- KHAI BÁO CÁC LỆNH SLASH COMMANDS (/) ---
 const commands = [
 	// Playback
-	new SlashCommandBuilder().setName("play").setDescription("Phát bài hát từ link hoặc từ khóa").addStringOption(o => o.setName("query").setDescription("Tên bài hát/URL").setRequired(true)),
-	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói (chỉ riêng bạn thấy)").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
+	new SlashCommandBuilder().setName("play").setDescription("Phát nhạc từ SoundCloud (nhập tên hoặc link)").addStringOption(o => o.setName("query").setDescription("Tên bài hát / Link SoundCloud").setRequired(true)),
+	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói (Chỉ mình bạn thấy)").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
 	new SlashCommandBuilder().setName("skip").setDescription("Bỏ qua bài hát hiện tại"),
 	new SlashCommandBuilder().setName("pause").setDescription("Tạm dừng phát nhạc"),
 	new SlashCommandBuilder().setName("resume").setDescription("Tiếp tục phát nhạc"),
@@ -116,7 +114,7 @@ const commands = [
 	
 	// Settings & Search
 	new SlashCommandBuilder().setName("volume").setDescription("Điều chỉnh âm lượng").addIntegerOption(o => o.setName("amount").setDescription("Mức âm lượng (0-200)").setRequired(true)),
-	new SlashCommandBuilder().setName("search").setDescription("Tìm kiếm bài hát").addStringOption(o => o.setName("query").setDescription("Tên bài hát").setRequired(true)),
+	new SlashCommandBuilder().setName("search").setDescription("Tìm kiếm bài hát trên SoundCloud").addStringOption(o => o.setName("query").setDescription("Tên bài hát").setRequired(true)),
 	
 	// Connection & Help
 	new SlashCommandBuilder().setName("join").setDescription("Vào kênh thoại của bạn"),
@@ -141,10 +139,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	const { commandName, options, member, guild, channel, user } = interaction;
 
-	// Xử lý hoãn phản hồi
+	// Xử lý hoãn phản hồi (Lệnh /tts ẩn hoàn toàn, các lệnh khác hiển thị bình thường)
 	try {
 		if (commandName === "tts") {
-			await interaction.deferReply({ flags: 64 });
+			await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 		} else {
 			await interaction.deferReply();
 		}
@@ -154,7 +152,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	let player = manager.get(guild.id);
 
-	// --- 1. PLAYBACK ---
+	// --- 1. PLAYBACK (CHỈ DÙNG SOUNDCLOUD) ---
 	if (commandName === "play" || commandName === "search") {
 		let rawQuery = options.getString("query");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
@@ -171,31 +169,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 			let res = null;
 
-			// 1. Tự động chuyển đổi link YouTube thành từ khóa tìm kiếm SoundCloud
-			if (rawQuery.includes("youtube.com") || rawQuery.includes("youtu.be")) {
-				const cleanName = rawQuery.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
-				res = await player.play(`scsearch:${cleanName}`, user.id).catch(() => null);
-			} 
-			// 2. Nếu tìm từ khóa, ưu tiên SoundCloud qua Lavalink
-			else if (!rawQuery.startsWith("http")) {
-				res = await player.play(`scsearch:${rawQuery}`, user.id).catch(() => null);
-				if (!res) {
-					res = await player.play(`spsearch:${rawQuery}`, user.id).catch(() => null);
-				}
-			} 
-			// 3. Nếu là URL Spotify/SoundCloud trực tiếp
-			else {
+			// Nếu là URL SoundCloud trực tiếp
+			if (rawQuery.includes("soundcloud.com")) {
 				res = await player.play(rawQuery, user.id).catch(() => null);
+			} else {
+				// Tất cả tìm kiếm bằng tên đều dùng SoundCloud (scsearch)
+				res = await player.play(`scsearch:${rawQuery}`, user.id).catch(() => null);
 			}
 
-			if (!res) return interaction.editReply("❌ Không thể lấy bài hát! Vui lòng dùng tên bài hát hoặc link Spotify / SoundCloud.");
+			if (!res) return interaction.editReply("❌ Không tìm thấy bài hát trên SoundCloud! Hãy thử từ khóa khác.");
 
 			if (player.currentTrack) player.currentTrack.requestedBy = user.id;
 			const title = res.title || res.name || rawQuery;
-			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
+			return interaction.editReply(`🟠 Đã thêm từ SoundCloud: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
-			return interaction.editReply("❌ Lỗi kết nối nguồn nhạc! Vui lòng thử lại với tên bài hát.");
+			return interaction.editReply("❌ Lỗi tìm kiếm SoundCloud! Vui lòng thử lại.");
 		}
 
 	} else if (commandName === "tts") {
@@ -205,7 +194,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		if (!player.connection) await player.connect(member.voice.channel);
 
 		await player.play(`tts:${text}`, user.id);
-		return interaction.editReply(`🗣️ Đang đọc: **"${text}"**`);
+		return interaction.editReply(`🗣️ Đang đọc giọng nói: **"${text}"**`);
 
 	} else if (["skip", "pause", "resume", "stop"].includes(commandName)) {
 		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
@@ -215,7 +204,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 		if (commandName === "skip") {
 			player.skip();
-			return interaction.editReply("⏭️ Đã bỏ qua bài hát hiện tại!");
+			return interaction.editReply("⏭️ Đã bỏ qua bài hát!");
 		} else if (commandName === "pause") {
 			player.pause(true);
 			return interaction.editReply("⏸️ Đã tạm dừng phát nhạc!");
@@ -224,7 +213,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			return interaction.editReply("▶️ Đã tiếp tục phát nhạc!");
 		} else if (commandName === "stop") {
 			player.destroy();
-			return interaction.editReply("👋 Đã dừng nhạc và ngắt kết nối!");
+			return interaction.editReply("👋 Đã dừng nhạc và rời kênh!");
 		}
 
 	// --- 1.5 AUDIO FILTERS ---
@@ -252,7 +241,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				return interaction.editReply(`❌ Không thể áp dụng filter: **${filterName}**`);
 			}
 		} else {
-			return interaction.editReply("❌ Trình quản lý filter không hỗ trợ player này.");
+			return interaction.editReply("❌ Trình quản lý filter không hỗ trợ.");
 		}
 
 	} else if (commandName === "removefilter") {
@@ -328,12 +317,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	// --- 4. HELP MENU ---
 	} else if (commandName === "help") {
 		const embed = new EmbedBuilder()
-			.setColor("#3498db")
-			.setTitle("🎵 Bảng Hướng Dẫn - Music Bot")
+			.setColor("#ff5500")
+			.setTitle("🟠 Bảng Hướng Dẫn - SoundCloud Music Bot")
 			.setDescription(
-				"**Phát Nhạc (Playback)**\n" +
-				"`/play <query>` - Phát bài hát từ từ khóa hoặc link (Spotify, SoundCloud)\n" +
-				"`/tts <text>` - Đọc văn bản bằng giọng nói (chỉ riêng bạn thấy)\n" +
+				"**Phát Nhạc (SoundCloud)**\n" +
+				"`/play <query>` - Phát bài hát từ từ khóa hoặc link SoundCloud\n" +
+				"`/tts <text>` - Đọc văn bản bằng giọng nói (Chỉ riêng bạn thấy)\n" +
 				"`/skip` - Bỏ qua bài hát đang phát\n" +
 				"`/pause` - Tạm dừng phát nhạc\n" +
 				"`/resume` - Tiếp tục phát nhạc\n" +
@@ -348,11 +337,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				"`/loop [off|track|queue]` - Cài đặt chế độ lặp lại\n" +
 				"`/shuffle` - Trộn ngẫu nhiên danh sách chờ\n" +
 				"`/autoplay` - Bật/Tắt tự động phát bài liên quan\n\n" +
-				"**Cài Đặt (Settings)**\n" +
+				"**Cài Đặt & Kết Nối**\n" +
 				"`/volume [0-200]` - Điều chỉnh âm lượng nhạc\n" +
-				"`/search <query>` - Tìm kiếm danh sách bài hát\n\n" +
-				"**Kết Nối (Connection)**\n" +
-				"`/join` - Mời bot vào kênh thoại của bạn\n" +
+				"`/join` - Mời bot vào kênh thoại\n" +
 				"`/leave` - Yêu cầu bot rời khỏi kênh thoại"
 			);
 		return interaction.editReply({ embeds: [embed] });
