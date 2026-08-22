@@ -2,7 +2,7 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { YouTubePlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
+const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin, TTSPlugin } = require("@ziplayer/plugin");
 const { voiceExt, lyricsExt } = require("@ziplayer/extension");
 
 // --- 1. WEB SERVER KEEP-ALIVE CHO RENDER FREE ---
@@ -31,20 +31,13 @@ const lrc = new lyricsExt(null, {
 
 const voice = new voiceExt(null, { client, lang: "vi-VN" });
 
-// --- 4. PLAYER MANAGER SETUP (CẤU HÌNH FIX LỖI YOUTUBE) ---
+// --- 4. PLAYER MANAGER SETUP ---
 const manager = new PlayerManager({
 	plugins: [
 		new TTSPlugin({ defaultLang: "vi" }),
-		new YouTubePlugin({
-			// Cấu hình mã hóa và bypass kiểm tra bot của YouTube
-			fetchOptions: {
-				headers: {
-					"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-					"Accept-Language": "en-US,en;q=0.9",
-				},
-			},
-		}),
+		new SoundCloudPlugin(),
 		new SpotifyPlugin(),
+		new YouTubePlugin(),
 	],
 	extensions: [lrc, voice],
 	autoCleanup: true,
@@ -52,12 +45,12 @@ const manager = new PlayerManager({
 
 // --- 5. EVENT LISTENERS ---
 manager.on("trackStart", (player, track) => {
-	const title = track.title || track.name || "Bài hát không tên";
+	const title = track?.title || track?.name || "Bài hát không tên";
 	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
 });
 
 manager.on("queueAdd", (player, track) => {
-	const title = track.title || track.name || "Bài hát không tên";
+	const title = track?.title || track?.name || "Bài hát không tên";
 	player.userdata?.channel?.send(`✅ Đã thêm vào hàng đợi: **${title}**`).catch(() => null);
 });
 
@@ -66,7 +59,7 @@ manager.on("ttsStart", (player, { track }) => {
 });
 
 manager.on("lyricsChange", async (player, track, result) => {
-	if (result.current) {
+	if (result?.current) {
 		const msg = `🎤 **Lời bài hát:** ${result.current}`;
 		player.userdata?.channel?.send(msg).catch(() => null);
 	}
@@ -96,7 +89,7 @@ manager.on("voiceCreate", async (player, evt) => {
 const commands = [
 	new SlashCommandBuilder()
 		.setName("play")
-		.setDescription("Phát bài hát từ URL hoặc từ khóa (YouTube/Spotify)")
+		.setDescription("Phát bài hát từ URL hoặc từ khóa")
 		.addStringOption(opt => opt.setName("query").setDescription("Tên bài hát hoặc liên kết").setRequired(true)),
 	new SlashCommandBuilder()
 		.setName("tts")
@@ -159,18 +152,29 @@ client.on("interactionCreate", async (interaction) => {
 		switch (commandName) {
 			case "play": {
 				const query = options.getString("query");
-				if (!member.voice.channel) return interaction.reply({ content: "❌ Bạn phải vào kênh thoại trước!", flags: 64 });
+				if (!member.voice.channel) {
+					return interaction.reply({ content: "❌ Bạn phải vào kênh thoại trước!", flags: 64 });
+				}
 
 				await interaction.deferReply();
-				const player = await ensurePlayer();
-				if (!player.connection) await player.connect(member.voice.channel);
 
-				const result = await player.play(query, interaction.user.id);
-				if (result) {
-					const trackName = result.title || result.tracks?.[0]?.title || query;
-					await interaction.editReply(`🔎 Đã thêm vào danh sách phát: **${trackName}**`);
-				} else {
-					await interaction.editReply("❌ Không thể tải âm thanh từ liên kết/từ khóa này!");
+				try {
+					const player = await ensurePlayer();
+					if (!player.connection) await player.connect(member.voice.channel);
+
+					const res = await player.play(query, interaction.user.id);
+					
+					let songTitle = "Bài hát";
+					if (res && typeof res === "object") {
+						songTitle = res.title || res.name || res.tracks?.[0]?.title || query;
+					} else if (player.currentTrack) {
+						songTitle = player.currentTrack.title || player.currentTrack.name || query;
+					}
+
+					await interaction.editReply(`🔎 Đã xử lý phát nhạc cho: **${songTitle}**`);
+				} catch (err) {
+					console.error("Lỗi khi phát nhạc:", err);
+					await interaction.editReply("❌ YouTube đang chặn kết nối từ server Render! Hãy dán link nhạc từ Spotify hoặc SoundCloud để phát.");
 				}
 				break;
 			}
@@ -223,12 +227,12 @@ client.on("interactionCreate", async (interaction) => {
 			case "queue": {
 				const player = manager.get(guild.id);
 				if (!player || !player.currentTrack) return interaction.reply({ content: "❌ Hàng đợi trống!", flags: 64 });
-				const current = player.currentTrack.title || "Không tên";
+				const current = player.currentTrack.title || player.currentTrack.name || "Không tên";
 				const list = player.upcomingTracks
-					.map((t, i) => `${i + 1}. ${t.title || "Không tên"}`)
+					.map((t, i) => `${i + 1}. ${t.title || t.name || "Không tên"}`)
 					.slice(0, 10)
 					.join("\n");
-				interaction.reply(`**Đang phát:** ${current}\n\n**Danh sách tiếp meo:**\n${list || "Không có bài tiếp theo."}`);
+				interaction.reply(`**Đang phát:** ${current}\n\n**Danh sách tiếp theo:**\n${list || "Không có bài tiếp theo."}`);
 				break;
 			}
 
@@ -236,7 +240,7 @@ client.on("interactionCreate", async (interaction) => {
 				const player = manager.get(guild.id);
 				if (!player || !player.currentTrack) return interaction.reply({ content: "❌ Không có bài hát nào đang phát!", flags: 64 });
 				const progress = player.getProgressBar();
-				interaction.reply(`▶️ **Đang phát:** ${player.currentTrack.title || "Không tên"}\n${progress}`);
+				interaction.reply(`▶️ **Đang phát:** ${player.currentTrack.title || player.currentTrack.name || "Không tên"}\n${progress}`);
 				break;
 			}
 
