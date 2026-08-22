@@ -2,10 +2,10 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin, TTSPlugin } = require("@ziplayer/plugin");
+const { YouTubePlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
 const { voiceExt, lyricsExt } = require("@ziplayer/extension");
 
-// --- BẮT LỖI TOÀN CỤC CHỐNG CRASH ---
+// --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
 process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
 process.on("unhandledRejection", (reason) => console.error("⚠️ Unhandled Rejection:", reason));
 
@@ -26,13 +26,12 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS (Ưu tiên SoundCloud & Spotify) ---
+// --- CẤU HÌNH PLUGINS TỐI ƯU ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
-	new SoundCloudPlugin(),
-	new SpotifyPlugin(),
+	new SpotifyPlugin({ emitError: false }),
 	new YouTubePlugin({
-		playerClients: ["IOS", "ANDROID"],
+		playerClients: ["ANDROID", "IOS"],
 	}),
 ];
 
@@ -126,34 +125,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 			let res = null;
 
-			// Nếu là link YouTube bị khoá, chuyển hướng sang SoundCloud/Spotify
+			// Nếu dán Link YouTube, tự động trích xuất tên bài hát để tìm qua Spotify (bypass IP Block)
 			if (rawQuery.includes("youtube.com") || rawQuery.includes("youtu.be")) {
-				const searchQuery = rawQuery.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
-				try {
-					res = await player.play(`scsearch:${searchQuery}`, user.id);
-				} catch (e) {
-					res = await player.play(`spsearch:${searchQuery}`, user.id);
-				}
+				const cleanName = rawQuery.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
+				res = await player.play(`spsearch:${cleanName}`, user.id).catch(() => null);
 			} else if (!rawQuery.startsWith("http")) {
-				// Nếu người dùng nhập tên bài hát, tìm kiếm trực tiếp trên SoundCloud để bypass IP YouTube
-				try {
-					res = await player.play(`scsearch:${rawQuery}`, user.id);
-				} catch (e) {
-					res = await player.play(rawQuery, user.id);
-				}
-			} else {
-				// Các trường hợp link khác (Spotify, SoundCloud, TTS...)
-				res = await player.play(rawQuery, user.id);
+				// Tìm kiếm từ khóa mặc định qua Spotify
+				res = await player.play(`spsearch:${rawQuery}`, user.id).catch(() => null);
 			}
 
-			if (!res) return interaction.editReply("❌ Không tìm thấy bài hát phù hợp!");
+			// Nếu tìm kiếm Spotify thất bại, phát theo query gốc
+			if (!res) {
+				res = await player.play(rawQuery, user.id).catch(() => null);
+			}
+
+			if (!res) return interaction.editReply("❌ Không thể lấy bài hát! Hãy thử gõ **tên bài hát** (VD: `/play Chúng ta của tương lai`) hoặc dùng link Spotify.");
 
 			if (player.currentTrack) player.currentTrack.requestedBy = user.id;
 			const title = res.title || res.name || rawQuery;
 			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
-			return interaction.editReply("❌ Không thể lấy nguồn audio. Bạn vui lòng dùng link Spotify hoặc tìm tên bài hát nhé!");
+			return interaction.editReply("❌ Lỗi kết nối nguồn nhạc! Vui lòng dùng tên bài hát hoặc link Spotify.");
 		}
 
 	} else if (commandName === "tts") {
@@ -243,7 +236,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				"`/skip` - Bỏ qua bài hát đang phát\n" +
 				"`/pause` - Tạm dừng phát nhạc\n" +
 				"`/resume` - Tiếp tục phát nhạc\n" +
-				"`/stop` - Dừng nhạc và xóa danh sách chờ\n\n" +
+				"`/stop` - Dừng phát nhạc và xóa danh sách chờ\n\n" +
 				"**Hàng Chờ (Queue)**\n" +
 				"`/queue` - Xem danh sách bài hát đang chờ\n" +
 				"`/nowplaying` - Xem thông tin bài hát đang phát\n" +
