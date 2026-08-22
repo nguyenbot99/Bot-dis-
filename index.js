@@ -27,11 +27,20 @@ const client = new Client({
 });
 
 // --- CẤU HÌNH PLUGINS & EXTENSIONS TỐI ƯU ---
+// Đọc cookie từ env để bypass YouTube IP block nếu có
+let ytCookies;
+try {
+	ytCookies = process.env.YOUTUBE_COOKIE ? JSON.parse(process.env.YOUTUBE_COOKIE) : undefined;
+} catch (e) {
+	console.error("⚠️ Không thể đọc YOUTUBE_COOKIE từ file .env/Environment Variables:", e.message);
+}
+
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
 	new SpotifyPlugin({ emitError: false }),
 	new YouTubePlugin({
 		playerClients: ["ANDROID", "IOS"],
+		cookies: ytCookies,
 	}),
 ];
 
@@ -172,16 +181,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 			let res = null;
 
-			// Nếu dán Link YouTube, tự động trích xuất tên bài hát để tìm qua Spotify (bypass IP Block)
+			// 1. Nếu dán Link YouTube, tự động trích xuất tên bài hát để tìm qua Spotify
 			if (rawQuery.includes("youtube.com") || rawQuery.includes("youtu.be")) {
 				const cleanName = rawQuery.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
 				res = await player.play(`spsearch:${cleanName}`, user.id).catch(() => null);
 			} else if (!rawQuery.startsWith("http")) {
-				// Tìm kiếm từ khóa mặc định qua Spotify
+				// 2. Tìm kiếm từ khóa mặc định qua Spotify
 				res = await player.play(`spsearch:${rawQuery}`, user.id).catch(() => null);
 			}
 
-			// Nếu tìm kiếm Spotify thất bại, phát theo query gốc
+			// 3. Fallback: Nếu Spotify thất bại, tìm kiếm qua SoundCloud bằng Lavalink (Tránh YouTube IP Block)
+			if (!res && !rawQuery.startsWith("http")) {
+				res = await player.play(`scsearch:${rawQuery}`, user.id).catch(() => null);
+			}
+
+			// 4. Nếu vẫn không được mới thử phát query gốc
 			if (!res) {
 				res = await player.play(rawQuery, user.id).catch(() => null);
 			}
