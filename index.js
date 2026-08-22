@@ -2,17 +2,14 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-// Nhập các plugin tiêu chuẩn từ @ziplayer/plugin
 const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin, TTSPlugin } = require("@ziplayer/plugin");
-// Nhập InfinityPlugin đúng vị trí từ gói @ziplayer/infinity
-const { InfinityPlugin } = require("@ziplayer/infinity");
 const { voiceExt, lyricsExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH ---
 process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
 process.on("unhandledRejection", (reason) => console.error("⚠️ Unhandled Rejection:", reason));
 
-// --- WEB SERVER KEEP-ALIVE (Render) ---
+// --- WEB SERVER KEEP-ALIVE ---
 http.createServer((req, res) => {
 	res.write("Bot ZiPlayer is Running!");
 	res.end();
@@ -29,7 +26,7 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- TỐI ƯU CẤU HÌNH PLUGIN & EXTENSION ---
+// --- CẤU HÌNH PLUGINS ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
 	new SpotifyPlugin(),
@@ -42,12 +39,6 @@ const plugins = [
 		},
 	}),
 ];
-
-try {
-	plugins.push(new InfinityPlugin());
-} catch (e) {
-	console.warn("⚠️ InfinityPlugin bypass:", e.message);
-}
 
 try {
 	plugins.push(new SoundCloudPlugin());
@@ -110,7 +101,7 @@ client.once("ready", async () => {
 	const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 	try {
 		await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-		console.log("✅ Đã cập nhật thành công Slash Commands!");
+		console.log("✅ Đã cập nhật Slash Commands thành công!");
 	} catch (error) {
 		console.error("❌ Lỗi Slash Commands:", error);
 	}
