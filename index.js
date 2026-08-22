@@ -55,7 +55,6 @@ const canControl = (interaction, player) => {
 	const userId = interaction.user.id;
 	const member = interaction.member;
 	
-	// Cho phép nếu là Administrator hoặc người yêu cầu bài hát hiện tại
 	if (member?.permissions?.has(PermissionFlagsBits.Administrator)) return true;
 	if (player?.currentTrack?.requestedBy === userId) return true;
 	return false;
@@ -67,23 +66,35 @@ manager.on("trackStart", (player, track) => {
 	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
 });
 
-// --- DANH SÁCH SLASH COMMANDS (/) ---
+// --- KHAI BÁO CÁC LỆNH SLASH COMMANDS (/) ---
 const commands = [
-	new SlashCommandBuilder().setName("play").setDescription("Phát bài hát từ link hoặc từ khóa").addStringOption(o => o.setName("query").setDescription("Tên bài hát hoặc URL").setRequired(true)),
-	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản giọng nói trong voice").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
+	// Playback
+	new SlashCommandBuilder().setName("play").setDescription("Phát bài hát từ link hoặc từ khóa").addStringOption(o => o.setName("query").setDescription("Tên bài hát/URL").setRequired(true)),
+	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
 	new SlashCommandBuilder().setName("skip").setDescription("Bỏ qua bài hát hiện tại"),
-	new SlashCommandBuilder().setName("pause").setDescription("Tạm dừng phát nhạc"),
+	new SlashCommandBuilder().setName("pause").setDescription("Tạm dừng nhạc"),
 	new SlashCommandBuilder().setName("resume").setDescription("Tiếp tục phát nhạc"),
-	new SlashCommandBuilder().setName("stop").setDescription("Dừng nhạc và dọn dẹp hàng chờ"),
-	new SlashCommandBuilder().setName("queue").setDescription("Xem danh sách hàng chờ nhạc"),
-	new SlashCommandBuilder().setName("nowplaying").setDescription("Xem bài hát đang phát"),
-	new SlashCommandBuilder().setName("loop").setDescription("Cài đặt chế độ lặp lại").addStringOption(o => o.setName("mode").setDescription("Lựa chọn: off | track | queue").setRequired(true)),
-	new SlashCommandBuilder().setName("shuffle").setDescription("Trộn ngẫu nhiên bài hát trong hàng chờ"),
-	new SlashCommandBuilder().setName("autoplay").setDescription("Bật/Tắt tự động phát bài hát liên quan"),
-	new SlashCommandBuilder().setName("volume").setDescription("Điều chỉnh âm lượng").addIntegerOption(o => o.setName("amount").setDescription("Mức âm lượng từ 0 đến 200").setRequired(true)),
-	new SlashCommandBuilder().setName("join").setDescription("Kết nối vào Voice Channel"),
-	new SlashCommandBuilder().setName("leave").setDescription("Rời khỏi Voice Channel"),
-	new SlashCommandBuilder().setName("help").setDescription("Xem bảng hướng dẫn sử dụng bot"),
+	new SlashCommandBuilder().setName("stop").setDescription("Dừng nhạc và xóa danh sách chờ"),
+	
+	// Queue
+	new SlashCommandBuilder().setName("queue").setDescription("Hiển thị danh sách nhạc chờ"),
+	new SlashCommandBuilder().setName("nowplaying").setDescription("Hiển thị thông tin bài hát đang phát"),
+	new SlashCommandBuilder().setName("loop").setDescription("Cài đặt chế độ lặp lại").addStringOption(o => o.setName("mode").setDescription("Chế độ: off | track | queue").setRequired(true).addChoices(
+		{ name: "Tắt lặp (off)", value: "off" },
+		{ name: "Lặp bài hiện tại (track)", value: "track" },
+		{ name: "Lặp toàn bộ hàng chờ (queue)", value: "queue" }
+	)),
+	new SlashCommandBuilder().setName("shuffle").setDescription("Trộn ngẫu nhiên danh sách hàng chờ"),
+	new SlashCommandBuilder().setName("autoplay").setDescription("Bật/Tắt chế độ tự phát bài liên quan"),
+	
+	// Settings & Search
+	new SlashCommandBuilder().setName("volume").setDescription("Chỉnh âm lượng nhạc").addIntegerOption(o => o.setName("amount").setDescription("Âm lượng từ 0-200").setRequired(true)),
+	new SlashCommandBuilder().setName("search").setDescription("Tìm kiếm bài hát").addStringOption(o => o.setName("query").setDescription("Tên bài hát").setRequired(true)),
+	
+	// Connection & Help
+	new SlashCommandBuilder().setName("join").setDescription("Kết nối bot vào kênh Voice"),
+	new SlashCommandBuilder().setName("leave").setDescription("Rời bot khỏi kênh Voice"),
+	new SlashCommandBuilder().setName("help").setDescription("Hiển thị bảng hướng dẫn sử dụng"),
 ].map(cmd => cmd.toJSON());
 
 client.once(Events.ClientReady, async (readyClient) => {
@@ -91,7 +102,7 @@ client.once(Events.ClientReady, async (readyClient) => {
 	const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 	try {
 		await rest.put(Routes.applicationCommands(readyClient.user.id), { body: commands });
-		console.log("✅ Đã cập nhật Slash Commands (/) thành công!");
+		console.log("✅ Đã cập nhật toàn bộ Slash Commands (/)!");
 	} catch (error) {
 		console.error("❌ Lỗi Slash Commands:", error);
 	}
@@ -106,40 +117,41 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	const { commandName, options, member, guild, channel, user } = interaction;
 	let player = manager.get(guild.id);
 
-	if (commandName === "play") {
+	// --- 1. PLAYBACK ---
+	if (commandName === "play" || commandName === "search") {
 		const query = options.getString("query");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
 
 		try {
 			if (!player) {
-				player = await manager.create(guild.id, {
-					userdata: { channel },
-					selfDeaf: true,
-				});
+				player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true });
 			}
-
-			if (!player.connection) {
-				await player.connect(member.voice.channel);
-			}
+			if (!player.connection) await player.connect(member.voice.channel);
 
 			const res = await player.play(query, user.id);
 			if (!res) return interaction.editReply("❌ Không tìm thấy bài hát hoặc lỗi nguồn phát!");
 			
-			if (player.currentTrack) {
-				player.currentTrack.requestedBy = user.id;
-			}
-			
+			if (player.currentTrack) player.currentTrack.requestedBy = user.id;
 			const title = res.title || res.name || query;
 			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
-			return interaction.editReply("❌ Lỗi lấy stream nhạc. Vui lòng thử lại với link Spotify!");
+			return interaction.editReply("❌ Lỗi lấy stream nhạc. Vui lòng dán link Spotify!");
 		}
+
+	} else if (commandName === "tts") {
+		const text = options.getString("text");
+		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
+		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true });
+		if (!player.connection) await player.connect(member.voice.channel);
+
+		await player.play(`tts:${text}`, user.id);
+		return interaction.editReply(`🗣️ Đang đọc: **"${text}"**`);
 
 	} else if (["skip", "pause", "resume", "stop"].includes(commandName)) {
 		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
 		if (!canControl(interaction, player)) {
-			return interaction.editReply("🔒 Chỉ người yêu cầu bài hát này (hoặc Admin) mới có quyền thao tác!");
+			return interaction.editReply("🔒 Chỉ người phát bài hát này (hoặc Admin) mới có quyền thao tác!");
 		}
 
 		if (commandName === "skip") {
@@ -147,47 +159,65 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			return interaction.editReply("⏭️ Đã skip bài hát!");
 		} else if (commandName === "pause") {
 			player.pause(true);
-			return interaction.editReply("⏸️ Đã tạm dừng nhạc!");
+			return interaction.editReply("⏸️ Đã tạm dừng phát nhạc!");
 		} else if (commandName === "resume") {
 			player.pause(false);
-			return interaction.editReply("▶️ Tiếp tục phát nhạc!");
+			return interaction.editReply("▶️ Đã tiếp tục phát nhạc!");
 		} else if (commandName === "stop") {
 			player.destroy();
 			return interaction.editReply("👋 Đã dừng nhạc và ngắt kết nối!");
 		}
 
+	// --- 2. QUEUE ---
 	} else if (commandName === "queue") {
-		if (!player || !player.queue.length) return interaction.editReply("📜 Hàng chờ đang trống!");
-		const list = player.queue.slice(0, 10).map((t, i) => `${i + 1}. ${t.title || t.name}`).join("\n");
-		return interaction.editReply(`📜 **Danh sách hàng chờ:**\n${list}`);
+		if (!player || !player.queue.length) return interaction.editReply("📜 Hàng chờ hiện tại đang trống!");
+		const list = player.queue.slice(0, 10).map((t, i) => `${i + 1}. **${t.title || t.name}**`).join("\n");
+		return interaction.editReply(`📜 **Danh sách hàng chờ (${player.queue.length} bài):**\n${list}`);
 
 	} else if (commandName === "nowplaying") {
 		if (!player || !player.currentTrack) return interaction.editReply("❌ Không có bài hát nào đang phát!");
 		return interaction.editReply(`🎵 Đang phát: **${player.currentTrack.title || player.currentTrack.name}**`);
 
+	} else if (commandName === "loop") {
+		const mode = options.getString("mode");
+		if (!player) return interaction.editReply("❌ Bot chưa tham gia kênh!");
+		if (typeof player.setLoop === "function") player.setLoop(mode);
+		return interaction.editReply(`🔄 Đã chỉnh chế độ lặp thành: **${mode}**`);
+
+	} else if (commandName === "shuffle") {
+		if (!player || !player.queue.length) return interaction.editReply("❌ Hàng chờ đang trống, không thể trộn!");
+		if (typeof player.shuffle === "function") player.shuffle();
+		return interaction.editReply("🔀 Đã trộn ngẫu nhiên danh sách chờ!");
+
+	} else if (commandName === "autoplay") {
+		if (!player) return interaction.editReply("❌ Bot chưa ở trong kênh!");
+		const isAutoplay = player.autoplay ? !player.autoplay : true;
+		player.autoplay = isAutoplay;
+		return interaction.editReply(`📻 Tự động phát bài liên quan: **${isAutoplay ? "Bật" : "Tắt"}**`);
+
+	// --- 3. SETTINGS & CONNECTION ---
 	} else if (commandName === "volume") {
 		const amount = options.getInteger("amount");
-		if (!player) return interaction.editReply("❌ Bot chưa tham gia kênh!");
-		if (amount < 0 || amount > 200) return interaction.editReply("❌ Vui lòng nhập mức âm lượng từ 0 đến 200!");
+		if (!player) return interaction.editReply("❌ Bot chưa ở trong kênh!");
+		if (amount < 0 || amount > 200) return interaction.editReply("❌ Mức âm lượng hợp lệ từ 0 đến 200!");
 		player.setVolume(amount);
 		return interaction.editReply(`🔊 Đã chỉnh âm lượng thành **${amount}%**`);
 
 	} else if (commandName === "join") {
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
-		if (!player) {
-			player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true });
-		}
+		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true });
 		await player.connect(member.voice.channel);
-		return interaction.editReply(`🔊 Đã kết nối vào kênh **${member.voice.channel.name}**!`);
+		return interaction.editReply(`🔊 Đã kết nối vào kênh **${member.voice.channel.name}**`);
 
 	} else if (commandName === "leave") {
 		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
 		player.destroy();
 		return interaction.editReply("👋 Đã rời khỏi kênh Voice!");
 
+	// --- 4. HELP MENU ---
 	} else if (commandName === "help") {
 		const embed = new EmbedBuilder()
-			.setColor("#3498db")
+			.setColor("#e74c3c")
 			.setTitle("🎵 Music Bot Help")
 			.setDescription(
 				"**Playback**\n" +
@@ -204,7 +234,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				"`/shuffle` - Shuffle queue\n" +
 				"`/autoplay` - Toggle autoplay\n\n" +
 				"**Settings**\n" +
-				"`/volume [0-200]` - Set volume\n\n" +
+				"`/volume [0-200]` - Set volume\n" +
+				"`/search <query>` - Search for songs\n\n" +
 				"**Connection**\n" +
 				"`/join` - Join your voice channel\n" +
 				"`/leave` - Leave voice channel"
