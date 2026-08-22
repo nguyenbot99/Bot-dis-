@@ -5,6 +5,15 @@ const { PlayerManager } = require("ziplayer");
 const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin, TTSPlugin } = require("@ziplayer/plugin");
 const { voiceExt, lyricsExt } = require("@ziplayer/extension");
 
+// --- 0. BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
+process.on("uncaughtException", (err) => {
+	console.error("⚠️ Bắt được lỗi Uncaught Exception (Đã chặn crash):", err.message);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+	console.error("⚠️ Bắt được lỗi Unhandled Rejection (Đã chặn crash):", reason);
+});
+
 // --- 1. WEB SERVER KEEP-ALIVE CHO RENDER FREE ---
 http.createServer((req, res) => {
 	res.write("Bot ZiPlayer is Running!");
@@ -31,17 +40,15 @@ const lrc = new lyricsExt(null, {
 
 const voice = new voiceExt(null, { client, lang: "vi-VN" });
 
-// --- 4. TẠO DANH SÁCH PLUGIN AN TOÀN (YOUTUBE + SPOTIFY + SOUNDCLOUD) ---
+// --- 4. TẠO DANH SÁCH PLUGIN AN TOÀN ---
 const plugins = [new TTSPlugin({ defaultLang: "vi" }), new SpotifyPlugin()];
 
-// Khởi tạo SoundCloud an toàn (tránh crash do Render bị block IP)
 try {
 	plugins.push(new SoundCloudPlugin());
 } catch (e) {
-	console.warn("⚠️ Khởi tạo SoundCloudPlugin thất bại, chuyển sang chế độ dự phòng:", e.message);
+	console.warn("⚠️ Không thể tải SoundCloudPlugin:", e.message);
 }
 
-// Khởi tạo YouTube
 plugins.push(
 	new YouTubePlugin({
 		fetchOptions: {
@@ -187,10 +194,10 @@ client.on("interactionCreate", async (interaction) => {
 						songTitle = player.currentTrack.title || player.currentTrack.name || query;
 					}
 
-					await interaction.editReply(`🔎 Đã thêm vào hàng đợi: **${songTitle}**`);
+					await interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${songTitle}**`);
 				} catch (err) {
-					console.error("Lỗi khi tìm/phát nhạc:", err);
-					await interaction.editReply("❌ Không thể lấy dữ liệu phát bài hát này. Bạn hãy thử dán link trực tiếp từ Spotify hoặc SoundCloud!");
+					console.error("Lỗi khi phát nhạc:", err);
+					await interaction.editReply("❌ Không thể giải mã âm thanh từ bài hát này (IP Render bị chặn YouTube). Bạn vui lòng dùng link Spotify hoặc SoundCloud!");
 				}
 				break;
 			}
