@@ -3,6 +3,8 @@ const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
 const { lavalinkExt } = require("@ziplayer/extension");
+const discordTTS = require("discord-tts");
+const { createAudioPlayer, createAudioResource, entersState, AudioPlayerStatus, VoiceConnectionStatus, joinVoiceChannel } = require("@discordjs/voice");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
 process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
@@ -25,7 +27,7 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// Khởi tạo Lavalink Extension (Xử lý âm thanh SoundCloud & TTS Stream)
+// Khởi tạo Lavalink Extension (Xử lý âm thanh SoundCloud)
 const lavalink = new lavalinkExt(null, {
 	nodes: [
 		{
@@ -41,7 +43,6 @@ const lavalink = new lavalinkExt(null, {
 	debug: false,
 });
 
-// Tắt toàn bộ plugin rườm rà, chỉ giữ Lavalink
 const manager = new PlayerManager({
 	extensions: [lavalink],
 	autoCleanup: true,
@@ -62,9 +63,7 @@ const canControl = (interaction, player) => {
 // --- EVENTS ---
 manager.on("trackStart", (player, track) => {
 	const title = track?.title || track?.name || "Bài hát";
-	if (!track?.isTTS) {
-		player.userdata?.channel?.send(`▶ Đang phát (SoundCloud): **${title}**`).catch(() => null);
-	}
+	player.userdata?.channel?.send(`▶ Đang phát (SoundCloud): **${title}**`).catch(() => null);
 });
 
 manager.on("filterApplied", (player, filter) => {
@@ -133,7 +132,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	const { commandName, options, member, guild, channel, user } = interaction;
 
 	try {
-		// Chỉ riêng lệnh /tts sử dụng ephemeral: true để ẩn dòng phản hồi khỏi người khác
+		// Chỉ riêng lệnh /tts dùng ephemeral: true để ẩn dòng phản hồi khỏi người khác
 		if (commandName === "tts") {
 			await interaction.deferReply({ ephemeral: true });
 		} else {
@@ -180,30 +179,40 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	} else if (commandName === "tts") {
 		const text = options.getString("text");
-		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
+		const voiceChannel = member?.voice?.channel;
+
+		if (!voiceChannel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
 
 		try {
-			if (!player) {
-				player = await manager.create(guild.id, { 
-					userdata: { channel }, 
-					selfDeaf: true, 
-					extensions: ["lavalinkExt"] 
-				});
+			// Tạm dừng nhạc nếu đang phát qua Lavalink để tránh đè tiếng
+			if (player && player.playing) {
+				player.pause(true);
 			}
-			if (!player.connection) await player.connect(member.voice.channel);
 
-			// Tạo URL phát giọng nói tiếng Việt từ Google Translate TTS
-			const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=tw-ob`;
+			// Tạo kết nối Voice trực tiếp qua Discord.js
+			const connection = joinVoiceChannel({
+				channelId: voiceChannel.id,
+				guildId: guild.id,
+				adapterCreator: guild.voiceAdapterCreator,
+			});
 
-			// Phát luồng Audio TTS qua Lavalink
-			const res = await player.play(ttsUrl, user.id);
-			if (res) {
-				if (player.currentTrack) player.currentTrack.isTTS = true;
-			}
+			const stream = discordTTS.getVoiceStream(text, { lang: "vi", slow: false });
+			const audioResource = createAudioResource(stream);
+			const audioPlayer = createAudioPlayer();
+
+			connection.subscribe(audioPlayer);
+			audioPlayer.play(audioResource);
+
+			// Tự động khôi phục phát nhạc sau khi đọc xong
+			audioPlayer.on(AudioPlayerStatus.Idle, () => {
+				if (player && player.paused) {
+					player.pause(false);
+				}
+			});
 
 			return interaction.editReply(`🗣️ Đã phát giọng nói vào Voice Channel: **"${text}"**`);
 		} catch (err) {
-			console.error("TTS Error:", err);
+			console.error("TTS Native Error:", err);
 			return interaction.editReply("❌ Có lỗi xảy ra khi phát TTS!");
 		}
 
