@@ -2,7 +2,6 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { TTSPlugin } = require("@ziplayer/plugin");
 const { lavalinkExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
@@ -26,12 +25,7 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS & EXTENSIONS (CHỈ GIỮ TTS & SOUNDCLOUD) ---
-const plugins = [
-	new TTSPlugin({ defaultLang: "vi" })
-];
-
-// Khởi tạo Lavalink Extension (Chuyên trách SoundCloud)
+// Khởi tạo Lavalink Extension (Xử lý âm thanh SoundCloud & TTS Stream)
 const lavalink = new lavalinkExt(null, {
 	nodes: [
 		{
@@ -47,9 +41,8 @@ const lavalink = new lavalinkExt(null, {
 	debug: false,
 });
 
-// Tắt hoàn toàn các nguồn trích xuất khác
+// Tắt toàn bộ plugin rườm rà, chỉ giữ Lavalink
 const manager = new PlayerManager({
-	plugins: plugins,
 	extensions: [lavalink],
 	autoCleanup: true,
 	extractorTimeout: 90000,
@@ -90,7 +83,7 @@ manager.on("filtersCleared", (player) => {
 const commands = [
 	// Playback
 	new SlashCommandBuilder().setName("play").setDescription("Phát nhạc từ SoundCloud (nhập tên hoặc link)").addStringOption(o => o.setName("query").setDescription("Tên bài hát / Link SoundCloud").setRequired(true)),
-	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
+	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói (Chỉ mình bạn thấy)").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
 	new SlashCommandBuilder().setName("skip").setDescription("Bỏ qua bài hát hiện tại"),
 	new SlashCommandBuilder().setName("pause").setDescription("Tạm dừng phát nhạc"),
 	new SlashCommandBuilder().setName("resume").setDescription("Tiếp tục phát nhạc"),
@@ -110,7 +103,7 @@ const commands = [
 		{ name: "Lặp toàn bộ hàng chờ (queue)", value: "queue" }
 	)),
 	new SlashCommandBuilder().setName("shuffle").setDescription("Trộn ngẫu nhiên bài hát trong hàng chờ"),
-	new SlashCommandBuilder().setName("autoplay").setDescription("Bật/Tắt chế độ tự động phát bài liên quan"),
+	new SlashCommandBuilder().setName("autoplay").setDescription("Bật/Tắt tự động phát bài liên quan"),
 	
 	// Settings & Search
 	new SlashCommandBuilder().setName("volume").setDescription("Điều chỉnh âm lượng").addIntegerOption(o => o.setName("amount").setDescription("Mức âm lượng (0-200)").setRequired(true)),
@@ -140,7 +133,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	const { commandName, options, member, guild, channel, user } = interaction;
 
 	try {
-		await interaction.deferReply();
+		// Chỉ riêng lệnh /tts sử dụng ephemeral: true để ẩn dòng phản hồi khỏi người khác
+		if (commandName === "tts") {
+			await interaction.deferReply({ ephemeral: true });
+		} else {
+			await interaction.deferReply();
+		}
 	} catch (e) {
 		return;
 	}
@@ -194,13 +192,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			}
 			if (!player.connection) await player.connect(member.voice.channel);
 
-			const track = await player.play(`tts:${text}`, user.id);
-			if (track) track.isTTS = true;
+			// Tạo URL phát giọng nói tiếng Việt từ Google Translate TTS
+			const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=tw-ob`;
 
-			return interaction.editReply(`🗣️ Đã phát giọng nói vào kênh thoại: **"${text}"**`);
+			// Phát luồng Audio TTS qua Lavalink
+			const res = await player.play(ttsUrl, user.id);
+			if (res) {
+				if (player.currentTrack) player.currentTrack.isTTS = true;
+			}
+
+			return interaction.editReply(`🗣️ Đã phát giọng nói vào Voice Channel: **"${text}"**`);
 		} catch (err) {
 			console.error("TTS Error:", err);
-			return interaction.editReply("❌ Có lỗi khi đọc TTS, vui lòng thử lại!");
+			return interaction.editReply("❌ Có lỗi xảy ra khi phát TTS!");
 		}
 
 	} else if (["skip", "pause", "resume", "stop"].includes(commandName)) {
@@ -329,7 +333,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			.setDescription(
 				"**Phát Nhạc (SoundCloud)**\n" +
 				"`/play <query>` - Phát bài hát từ từ khóa hoặc link SoundCloud\n" +
-				"`/tts <text>` - Đọc văn bản bằng giọng nói\n" +
+				"`/tts <text>` - Đọc văn bản bằng giọng nói (Chỉ riêng bạn thấy)\n" +
 				"`/skip` - Bỏ qua bài hát đang phát\n" +
 				"`/pause` - Tạm dừng phát nhạc\n" +
 				"`/resume` - Tiếp tục phát nhạc\n" +
