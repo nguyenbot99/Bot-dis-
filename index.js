@@ -1,10 +1,11 @@
 require("dotenv").config();
 const http = require("http");
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits, MessageFlags } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
 const { lavalinkExt } = require("@ziplayer/extension");
-const discordTTS = require("discord-tts");
-const { createAudioPlayer, createAudioResource, entersState, AudioPlayerStatus, VoiceConnectionStatus, joinVoiceChannel } = require("@discordjs/voice");
+const { createAudioPlayer, createAudioResource, joinVoiceChannel, AudioPlayerStatus } = require("@discordjs/voice");
+const prism = require("prism-media");
+const https = require("https");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
 process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
@@ -80,7 +81,6 @@ manager.on("filtersCleared", (player) => {
 
 // --- KHAI BÁO CÁC LỆNH SLASH COMMANDS (/) ---
 const commands = [
-	// Playback
 	new SlashCommandBuilder().setName("play").setDescription("Phát nhạc từ SoundCloud (nhập tên hoặc link)").addStringOption(o => o.setName("query").setDescription("Tên bài hát / Link SoundCloud").setRequired(true)),
 	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói (Chỉ mình bạn thấy)").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
 	new SlashCommandBuilder().setName("skip").setDescription("Bỏ qua bài hát hiện tại"),
@@ -88,12 +88,10 @@ const commands = [
 	new SlashCommandBuilder().setName("resume").setDescription("Tiếp tục phát nhạc"),
 	new SlashCommandBuilder().setName("stop").setDescription("Dừng phát nhạc và dọn dẹp hàng chờ"),
 	
-	// Audio Filters
 	new SlashCommandBuilder().setName("filter").setDescription("Áp dụng hoặc xem danh sách filter âm thanh").addStringOption(o => o.setName("name").setDescription("Tên filter (để trống để xem danh sách)")),
 	new SlashCommandBuilder().setName("removefilter").setDescription("Gỡ bộ lọc âm thanh").addStringOption(o => o.setName("name").setDescription("Tên filter cần gỡ").setRequired(true)),
 	new SlashCommandBuilder().setName("clearfilters").setDescription("Xóa toàn bộ bộ lọc âm thanh đang áp dụng"),
 
-	// Queue
 	new SlashCommandBuilder().setName("queue").setDescription("Xem danh sách bài hát đang chờ"),
 	new SlashCommandBuilder().setName("nowplaying").setDescription("Xem bài hát đang được phát"),
 	new SlashCommandBuilder().setName("loop").setDescription("Cài đặt chế độ lặp lại").addStringOption(o => o.setName("mode").setDescription("Chế độ: off | track | queue").setRequired(true).addChoices(
@@ -104,11 +102,9 @@ const commands = [
 	new SlashCommandBuilder().setName("shuffle").setDescription("Trộn ngẫu nhiên bài hát trong hàng chờ"),
 	new SlashCommandBuilder().setName("autoplay").setDescription("Bật/Tắt tự động phát bài liên quan"),
 	
-	// Settings & Search
 	new SlashCommandBuilder().setName("volume").setDescription("Điều chỉnh âm lượng").addIntegerOption(o => o.setName("amount").setDescription("Mức âm lượng (0-200)").setRequired(true)),
 	new SlashCommandBuilder().setName("search").setDescription("Tìm kiếm bài hát trên SoundCloud").addStringOption(o => o.setName("query").setDescription("Tên bài hát").setRequired(true)),
 	
-	// Connection & Help
 	new SlashCommandBuilder().setName("join").setDescription("Vào kênh thoại của bạn"),
 	new SlashCommandBuilder().setName("leave").setDescription("Rời khỏi kênh thoại"),
 	new SlashCommandBuilder().setName("help").setDescription("Hiển thị danh sách hướng dẫn lệnh"),
@@ -132,9 +128,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	const { commandName, options, member, guild, channel, user } = interaction;
 
 	try {
-		// Chỉ riêng lệnh /tts dùng ephemeral: true để ẩn dòng phản hồi khỏi người khác
 		if (commandName === "tts") {
-			await interaction.deferReply({ ephemeral: true });
+			await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 		} else {
 			await interaction.deferReply();
 		}
@@ -144,7 +139,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	let player = manager.get(guild.id);
 
-	// --- 1. PLAYBACK ---
 	if (commandName === "play" || commandName === "search") {
 		let rawQuery = options.getString("query");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
@@ -160,7 +154,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			if (!player.connection) await player.connect(member.voice.channel);
 
 			let res = null;
-
 			if (rawQuery.includes("soundcloud.com")) {
 				res = await player.play(rawQuery, user.id).catch(() => null);
 			} else {
@@ -184,30 +177,36 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		if (!voiceChannel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
 
 		try {
-			// Tạm dừng nhạc nếu đang phát qua Lavalink để tránh đè tiếng
 			if (player && player.playing) {
 				player.pause(true);
 			}
 
-			// Tạo kết nối Voice trực tiếp qua Discord.js
 			const connection = joinVoiceChannel({
 				channelId: voiceChannel.id,
 				guildId: guild.id,
 				adapterCreator: guild.voiceAdapterCreator,
 			});
 
-			const stream = discordTTS.getVoiceStream(text, { lang: "vi", slow: false });
-			const audioResource = createAudioResource(stream);
-			const audioPlayer = createAudioPlayer();
+			const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=vi&client=tw-ob`;
 
-			connection.subscribe(audioPlayer);
-			audioPlayer.play(audioResource);
+			https.get(ttsUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+				const transcoder = new prism.FFmpeg({
+					args: ["-analyzeduration", "0", "-loglevel", "0", "-f", "mp3", "-ar", "48000", "-ac", "2"],
+				});
 
-			// Tự động khôi phục phát nhạc sau khi đọc xong
-			audioPlayer.on(AudioPlayerStatus.Idle, () => {
-				if (player && player.paused) {
-					player.pause(false);
-				}
+				const audioResource = createAudioResource(res.pipe(transcoder));
+				const audioPlayer = createAudioPlayer();
+
+				connection.subscribe(audioPlayer);
+				audioPlayer.play(audioResource);
+
+				audioPlayer.on(AudioPlayerStatus.Idle, () => {
+					if (player && player.paused) {
+						player.pause(false);
+					}
+				});
+			}).on("error", (err) => {
+				console.error("TTS Stream Error:", err);
 			});
 
 			return interaction.editReply(`🗣️ Đã phát giọng nói vào Voice Channel: **"${text}"**`);
@@ -236,7 +235,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			return interaction.editReply("👋 Đã dừng nhạc và rời kênh!");
 		}
 
-	// --- 1.5 AUDIO FILTERS ---
 	} else if (commandName === "filter") {
 		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
 		const filterName = options.getString("name");
@@ -288,7 +286,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			return interaction.editReply("❌ Trình quản lý filter không hỗ trợ.");
 		}
 
-	// --- 2. QUEUE ---
 	} else if (commandName === "queue") {
 		if (!player || !player.queue.length) return interaction.editReply("📜 Hàng chờ hiện tại đang trống!");
 		const list = player.queue.slice(0, 10).map((t, i) => `${i + 1}. **${t.title || t.name}**`).join("\n");
@@ -315,7 +312,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		player.autoplay = isAutoplay;
 		return interaction.editReply(`📻 Tự động phát bài liên quan: **${isAutoplay ? "Bật" : "Tắt"}**`);
 
-	// --- 3. SETTINGS & CONNECTION ---
 	} else if (commandName === "volume") {
 		const amount = options.getInteger("amount");
 		if (!player) return interaction.editReply("❌ Bot chưa ở trong kênh!");
@@ -334,7 +330,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		player.destroy();
 		return interaction.editReply("👋 Đã rời khỏi kênh thoại!");
 
-	// --- 4. HELP MENU ---
 	} else if (commandName === "help") {
 		const embed = new EmbedBuilder()
 			.setColor("#ff5500")
