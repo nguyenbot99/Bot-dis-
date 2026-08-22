@@ -11,12 +11,12 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "discord.js": "^14.15.0",
-    "@discordjs/voice": "^0.16.1",
-    "ziplayer": "^1.0.0",
-    "@ziplayer/plugin": "^1.0.0",
-    "@ziplayer/extension": "^1.0.0",
-    "dotenv": "^16.4.5"
+    "discord.js": "14.15.3",
+    "@discordjs/voice": "0.16.1",
+    "ziplayer": "latest",
+    "@ziplayer/plugin": "latest",
+    "@ziplayer/extension": "latest",
+    "dotenv": "16.4.5"
   },
   "engines": {
     "node": "18.x"
