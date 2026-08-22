@@ -21,7 +21,7 @@ const client = new Client({
 		GatewayIntentBits.GuildMessages,
 		GatewayIntentBits.GuildVoiceStates,
 		GatewayIntentBits.GuildMembers,
-		GatewayIntentBits.MessageContent, // Thêm Intent đọc nội dung tin nhắn
+		GatewayIntentBits.MessageContent,
 	],
 	partials: [Partials.Channel],
 });
@@ -56,13 +56,36 @@ const manager = new PlayerManager({
 	extractorTimeout: 90000,
 });
 
+// --- HÀM XỬ LÝ EQ CLARITY ---
+const applyClarity = async (player) => {
+	if (!player) return false;
+	try {
+		if (player.filter && typeof player.filter.applyFilter === "function") {
+			await player.filter.applyFilter("trebleboost");
+			return true;
+		}
+		if (player.filters && typeof player.filters.set === "function") {
+			await player.filters.set("trebleboost");
+			return true;
+		}
+		if (typeof player.setFilter === "function") {
+			await player.setFilter("trebleboost");
+			return true;
+		}
+		return false;
+	} catch (error) {
+		console.error("applyClarity error:", error);
+		return false;
+	}
+};
+
 // --- EVENTS ---
 manager.on("trackStart", (player, track) => {
 	const title = track?.title || track?.name || "Bài hát";
 	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
 });
 
-// --- SLASH COMMANDS ---
+// --- SLASH COMMANDS DANH SÁCH ---
 const commands = [
 	new SlashCommandBuilder()
 		.setName("play")
@@ -70,6 +93,7 @@ const commands = [
 		.addStringOption(opt => opt.setName("query").setDescription("Tên bài hát hoặc URL").setRequired(true)),
 	new SlashCommandBuilder().setName("skip").setDescription("Bỏ qua bài hát hiện tại"),
 	new SlashCommandBuilder().setName("stop").setDescription("Dừng nhạc và rời kênh"),
+	new SlashCommandBuilder().setName("clarity").setDescription("Bật bộ lọc âm thanh Clarity (Treble Boost)"),
 ].map(cmd => cmd.toJSON());
 
 client.once("ready", async () => {
@@ -87,7 +111,6 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
 	if (!interaction.isChatInputCommand()) return;
 
-	// BÁO CHO DISCORD BIẾT BOT ĐANG XỬ LÝ NGHAY LẬP TỨC (Tránh lỗi không phản hồi)
 	try {
 		await interaction.deferReply();
 	} catch (e) {
@@ -122,26 +145,60 @@ client.on("interactionCreate", async (interaction) => {
 				return interaction.editReply("❌ YouTube chặn stream trên IP này. Hãy thử dán **link Spotify** hoặc **SoundCloud**!");
 			}
 
+			// Lưu ID người yêu cầu bài hát
+			if (player.currentTrack) {
+				player.currentTrack.requestedBy = interaction.user.id;
+			}
+
 			const title = res.title || res.name || query;
 			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
 			return interaction.editReply("❌ Lỗi lấy stream nhạc. Vui lòng dùng link Spotify!");
 		}
+
 	} else if (commandName === "skip") {
 		const player = manager.get(guild.id);
-		if (player) {
-			player.skip();
-			return interaction.editReply("⏭️ Đã skip!");
+		if (!player || !player.currentTrack) {
+			return interaction.editReply("❌ Không có nhạc đang phát!");
 		}
-		return interaction.editReply("❌ Không có nhạc đang phát!");
+
+		// Kiểm tra người yêu cầu bài hát
+		const currentTrack = player.currentTrack;
+		if (currentTrack.requestedBy && currentTrack.requestedBy !== interaction.user.id) {
+			return interaction.editReply("🔒 Chỉ người yêu cầu bài hát này mới có quyền skip!");
+		}
+
+		player.skip();
+		return interaction.editReply("⏭️ Đã skip!");
+
 	} else if (commandName === "stop") {
 		const player = manager.get(guild.id);
-		if (player) {
-			player.destroy();
-			return interaction.editReply("👋 Đã ngắt kết nối!");
+		if (!player) {
+			return interaction.editReply("❌ Bot chưa ở trong kênh!");
 		}
-		return interaction.editReply("❌ Bot chưa ở trong kênh!");
+
+		// Kiểm tra người yêu cầu bài hát hiện tại
+		const currentTrack = player.currentTrack;
+		if (currentTrack && currentTrack.requestedBy && currentTrack.requestedBy !== interaction.user.id) {
+			return interaction.editReply("🔒 Chỉ người yêu cầu bài hát hiện tại mới có quyền stop!");
+		}
+
+		player.destroy();
+		return interaction.editReply("👋 Đã ngắt kết nối!");
+
+	} else if (commandName === "clarity") {
+		const player = manager.get(guild.id);
+		if (!player || !player.currentTrack) {
+			return interaction.editReply("❌ Không có bài hát nào đang phát!");
+		}
+
+		const success = await applyClarity(player);
+		if (success) {
+			return interaction.editReply("✨ Đã bật chế độ âm thanh **Clarity (Treble Boost)**!");
+		} else {
+			return interaction.editReply("❌ Trình phát nhạc hiện tại không hỗ trợ bộ lọc Clarity.");
+		}
 	}
 });
 
