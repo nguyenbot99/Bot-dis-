@@ -3,7 +3,7 @@ const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
 const { YouTubePlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
-const { voiceExt, lyricsExt } = require("@ziplayer/extension");
+const { voiceExt, lyricsExt, lavalinkExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
 process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
@@ -26,7 +26,7 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS TỐI ƯU ---
+// --- CẤU HÌNH PLUGINS & EXTENSIONS TỐI ƯU ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
 	new SpotifyPlugin({ emitError: false }),
@@ -38,9 +38,25 @@ const plugins = [
 const lrc = new lyricsExt({ includeSynced: true, autoFetchOnTrackStart: true, sanitizeTitle: true });
 const voice = new voiceExt({ lang: "vi-VN" });
 
+// Khởi tạo Lavalink Extension
+const lavalink = new lavalinkExt(null, {
+	nodes: [
+		{
+			identifier: "main-node",
+			password: process.env.LAVALINK_PASSWORD || "youshallnotpass",
+			host: process.env.LAVALINK_HOST || "5.39.63.207",
+			port: parseInt(process.env.LAVALINK_PORT) || 4722,
+			secure: process.env.LAVALINK_SECURE === "true" || false,
+		},
+	],
+	client: client,
+	searchPrefix: "scsearch",
+	debug: false,
+});
+
 const manager = new PlayerManager({
 	plugins: plugins,
-	extensions: [lrc, voice],
+	extensions: [lrc, voice, lavalink],
 	autoCleanup: true,
 	extractorTimeout: 90000,
 });
@@ -61,6 +77,18 @@ manager.on("trackStart", (player, track) => {
 	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
 });
 
+manager.on("filterApplied", (player, filter) => {
+	player.userdata?.channel?.send(`🎛️ Đã áp dụng filter: **${filter?.name || "Filter"}**`).catch(() => null);
+});
+
+manager.on("filterRemoved", (player, filter) => {
+	player.userdata?.channel?.send(`🎛️ Đã gỡ filter: **${filter?.name || "Filter"}**`).catch(() => null);
+});
+
+manager.on("filtersCleared", (player) => {
+	player.userdata?.channel?.send(`🎛️ Đã xóa tất cả filters`).catch(() => null);
+});
+
 // --- KHAI BÁO CÁC LỆNH SLASH COMMANDS (/) ---
 const commands = [
 	// Playback
@@ -71,6 +99,11 @@ const commands = [
 	new SlashCommandBuilder().setName("resume").setDescription("Tiếp tục phát nhạc"),
 	new SlashCommandBuilder().setName("stop").setDescription("Dừng phát nhạc và dọn dẹp hàng chờ"),
 	
+	// Audio Filters
+	new SlashCommandBuilder().setName("filter").setDescription("Áp dụng hoặc xem danh sách filter âm thanh").addStringOption(o => o.setName("name").setDescription("Tên filter (để trống để xem danh sách)")),
+	new SlashCommandBuilder().setName("removefilter").setDescription("Gỡ bộ lọc âm thanh").addStringOption(o => o.setName("name").setDescription("Tên filter cần gỡ").setRequired(true)),
+	new SlashCommandBuilder().setName("clearfilters").setDescription("Xóa toàn bộ bộ lọc âm thanh đang áp dụng"),
+
 	// Queue
 	new SlashCommandBuilder().setName("queue").setDescription("Xem danh sách bài hát đang chờ"),
 	new SlashCommandBuilder().setName("nowplaying").setDescription("Xem bài hát đang được phát"),
@@ -119,7 +152,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 		try {
 			if (!player) {
-				player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true });
+				player = await manager.create(guild.id, { 
+					userdata: { channel }, 
+					selfDeaf: true,
+					extensions: ["lavalinkExt"] 
+				});
 			}
 			if (!player.connection) await player.connect(member.voice.channel);
 
@@ -152,7 +189,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	} else if (commandName === "tts") {
 		const text = options.getString("text");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
-		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true });
+		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true, extensions: ["lavalinkExt"] });
 		if (!player.connection) await player.connect(member.voice.channel);
 
 		await player.play(`tts:${text}`, user.id);
@@ -176,6 +213,58 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		} else if (commandName === "stop") {
 			player.destroy();
 			return interaction.editReply("👋 Đã dừng nhạc và ngắt kết nối!");
+		}
+
+	// --- 1.5 AUDIO FILTERS ---
+	} else if (commandName === "filter") {
+		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
+		const filterName = options.getString("name");
+
+		if (!filterName) {
+			if (!player.filter) return interaction.editReply("❌ Trình quản lý filter không khả dụng.");
+			const availableFilters = player.filter.getAvailableFilters ? player.filter.getAvailableFilters() : [];
+			if (!availableFilters.length) return interaction.editReply("🎛️ Không có danh sách filter khả dụng.");
+			
+			let response = "🎛️ **Danh sách filters có sẵn:**\n";
+			availableFilters.forEach((f) => {
+				response += `• \`${f.name}\` - ${f.description || "Không có mô tả"}\n`;
+			});
+			return interaction.editReply(response);
+		}
+
+		if (player.filter && typeof player.filter.applyFilter === "function") {
+			const success = player.filter.applyFilter(filterName);
+			if (success) {
+				return interaction.editReply(`✅ Đã áp dụng filter: **${filterName}**`);
+			} else {
+				return interaction.editReply(`❌ Không thể áp dụng filter: **${filterName}**`);
+			}
+		} else {
+			return interaction.editReply("❌ Trình quản lý filter không hỗ trợ player này.");
+		}
+
+	} else if (commandName === "removefilter") {
+		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
+		const filterToRemove = options.getString("name");
+
+		if (player.filter && typeof player.filter.removeFilter === "function") {
+			const removed = player.filter.removeFilter(filterToRemove);
+			if (removed) {
+				return interaction.editReply(`✅ Đã gỡ filter: **${filterToRemove}**`);
+			} else {
+				return interaction.editReply(`❌ Không tìm thấy filter: **${filterToRemove}**`);
+			}
+		} else {
+			return interaction.editReply("❌ Trình quản lý filter không hỗ trợ.");
+		}
+
+	} else if (commandName === "clearfilters") {
+		if (!player) return interaction.editReply("❌ Bot chưa ở trong Voice Channel!");
+		if (player.filter && typeof player.filter.clearAll === "function") {
+			player.filter.clearAll();
+			return interaction.editReply("✅ Đã xóa tất cả filters!");
+		} else {
+			return interaction.editReply("❌ Trình quản lý filter không hỗ trợ.");
 		}
 
 	// --- 2. QUEUE ---
@@ -215,7 +304,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	} else if (commandName === "join") {
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
-		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true });
+		if (!player) player = await manager.create(guild.id, { userdata: { channel }, selfDeaf: true, extensions: ["lavalinkExt"] });
 		await player.connect(member.voice.channel);
 		return interaction.editReply(`🔊 Đã tham gia kênh thoại **${member.voice.channel.name}**`);
 
@@ -237,6 +326,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 				"`/pause` - Tạm dừng phát nhạc\n" +
 				"`/resume` - Tiếp tục phát nhạc\n" +
 				"`/stop` - Dừng phát nhạc và xóa danh sách chờ\n\n" +
+				"**Bộ Lọc Âm Thanh (Filters)**\n" +
+				"`/filter [name]` - Áp dụng filter hoặc xem danh sách\n" +
+				"`/removefilter <name>` - Gỡ filter cụ thể\n" +
+				"`/clearfilters` - Xóa tất cả filter đang bật\n\n" +
 				"**Hàng Chờ (Queue)**\n" +
 				"`/queue` - Xem danh sách bài hát đang chờ\n" +
 				"`/nowplaying` - Xem thông tin bài hát đang phát\n" +
