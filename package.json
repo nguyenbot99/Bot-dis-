@@ -7,11 +7,12 @@
     "start": "node index.js"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@discordjs/voice": "^0.17.0",
     "@ziplayer/extension": "latest",
+    "@ziplayer/infinity": "latest",
     "@ziplayer/plugin": "latest",
     "discord.js": "^14.15.3",
     "dotenv": "^16.4.5",
