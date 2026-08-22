@@ -32,8 +32,6 @@ const client = new Client({
   ],
 });
 
-// ==================== MANAGER ====================
-
 const lrc = new lyricsExt(null, {
   includeSynced: true,
   autoFetchOnTrackStart: true,
@@ -52,8 +50,6 @@ const manager = new PlayerManager({
   enableSearchCache: true,
   enableStatsCollection: false,
 });
-
-// ==================== EVENTS ====================
 
 manager.on("trackStart", (player, track) => {
   const ch = player?.userdata?.ch;
@@ -123,15 +119,11 @@ manager.on("lyricsChange", async (player, track, result) => {
   }
 });
 
-// ==================== DISCORD CLIENT ====================
-
 client.once("ready", () => {
   console.log(`✅ Bot: ${client.user.tag}`);
   console.log("🎵 YouTube • Spotify • SoundCloud • Lyrics");
   client.user.setActivity("/help", { type: "LISTENING" });
 });
-
-// ==================== FUNCTIONS ====================
 
 const canControl = (msg, player) => {
   const track = player?.currentTrack;
@@ -153,8 +145,6 @@ const getPlayer = async (guildId, ch) => {
   return p;
 };
 
-// ==================== MESSAGE HANDLER ====================
-
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot || !msg.guild || !msg.content.startsWith(prefix))
     return;
@@ -164,7 +154,6 @@ client.on("messageCreate", async (msg) => {
   const vc = msg.member?.voice?.channel;
 
   try {
-    // PLAY - YouTube/Spotify
     if (cmd === "play" || cmd === "p") {
       if (!vc) return msg.reply("❌ Vào voice");
       const q = args.join(" ");
@@ -192,10 +181,7 @@ client.on("messageCreate", async (msg) => {
       } catch (e) {
         r.edit(`❌ ${e.message}`).catch(() => {});
       }
-    }
-
-    // SCPLAY - SoundCloud
-    else if (cmd === "scplay" || cmd === "sc") {
+    } else if (cmd === "scplay" || cmd === "sc") {
       if (!vc) return msg.reply("❌ Vào voice");
       const q = args.join(" ");
       if (!q) return msg.reply("❌ `/scplay <bài hát>`");
@@ -223,10 +209,7 @@ client.on("messageCreate", async (msg) => {
       } catch (e) {
         r.edit(`❌ ${e.message}`).catch(() => {});
       }
-    }
-
-    // JOIN
-    else if (cmd === "join") {
+    } else if (cmd === "join") {
       if (!vc) return msg.reply("❌ Vào voice");
       const p = await getPlayer(msg.guildId, msg.channel);
       if (!p.connection) {
@@ -237,54 +220,36 @@ client.on("messageCreate", async (msg) => {
         }
       }
       msg.reply("✅ Vào được").catch(() => {});
-    }
-
-    // LEAVE
-    else if (cmd === "leave" || cmd === "disconnect") {
+    } else if (cmd === "leave" || cmd === "disconnect") {
       const p = manager.get(msg.guildId);
       if (!p) return msg.reply("❌ Chưa vào");
       p.destroy();
       msg.reply("👋 Rời").catch(() => {});
-    }
-
-    // PAUSE
-    else if (cmd === "pause") {
+    } else if (cmd === "pause") {
       const p = manager.get(msg.guildId);
       if (!p?.isPlaying) return msg.reply("❌ Không có nhạc");
       p.pause();
       msg.reply("⏸️ Tạm dừng").catch(() => {});
-    }
-
-    // RESUME
-    else if (cmd === "resume") {
+    } else if (cmd === "resume") {
       const p = manager.get(msg.guildId);
       if (!p?.isPaused) return msg.reply("❌ Không dừng");
       p.resume();
       msg.reply("▶️ Phát").catch(() => {});
-    }
-
-    // SKIP
-    else if (cmd === "skip" || cmd === "next") {
+    } else if (cmd === "skip" || cmd === "next") {
       const p = manager.get(msg.guildId);
       if (!p?.currentTrack) return msg.reply("❌ Không có nhạc");
       if (!canControl(msg, p))
         return msg.reply("🔒 Chỉ người phát được skip");
       p.skip();
       msg.reply("⏭️ Bỏ qua").catch(() => {});
-    }
-
-    // STOP
-    else if (cmd === "stop") {
+    } else if (cmd === "stop") {
       const p = manager.get(msg.guildId);
       if (!p) return msg.reply("❌ Không có nhạc");
       if (!canControl(msg, p))
         return msg.reply("🔒 Chỉ người phát được stop");
       p.stop();
       msg.reply("⏹️ Dừng").catch(() => {});
-    }
-
-    // VOLUME
-    else if (cmd === "volume" || cmd === "vol") {
+    } else if (cmd === "volume" || cmd === "vol") {
       const p = manager.get(msg.guildId);
       if (!p) return msg.reply("❌ Không có nhạc");
       if (!args[0]) return msg.reply(`🔊 ${p.volume}%`);
@@ -292,10 +257,7 @@ client.on("messageCreate", async (msg) => {
       if (isNaN(v) || v < 0 || v > 200) return msg.reply("❌ 0-200");
       p.setVolume(v);
       msg.reply(`🔊 ${v}%`).catch(() => {});
-    }
-
-    // NP
-    else if (cmd === "np") {
+    } else if (cmd === "np") {
       const p = manager.get(msg.guildId);
       if (!p?.currentTrack) return msg.reply("❌ Không có nhạc");
       const t = p.currentTrack;
@@ -319,10 +281,7 @@ client.on("messageCreate", async (msg) => {
           inline: true,
         });
       msg.reply({ embeds: [embed] }).catch(() => {});
-    }
-
-    // QUEUE
-    else if (cmd === "queue" || cmd === "q") {
+    } else if (cmd === "queue" || cmd === "q") {
       const p = manager.get(msg.guildId);
       if (!p?.currentTrack) return msg.reply("❌ Không có nhạc");
       const list = (p.upcomingTracks || [])
@@ -341,10 +300,7 @@ client.on("messageCreate", async (msg) => {
           value: list,
         });
       msg.reply({ embeds: [embed] }).catch(() => {});
-    }
-
-    // LOOP
-    else if (cmd === "loop") {
+    } else if (cmd === "loop") {
       const p = manager.get(msg.guildId);
       if (!p) return msg.reply("❌ Không có nhạc");
       const m = args[0]?.toLowerCase() || "off";
@@ -353,18 +309,12 @@ client.on("messageCreate", async (msg) => {
       p.loop(m);
       const names = { off: "Tắt", track: "Lặp bài", queue: "Lặp hàng đợi" };
       msg.reply(`🔁 ${names[m]}`).catch(() => {});
-    }
-
-    // SHUFFLE
-    else if (cmd === "shuffle") {
+    } else if (cmd === "shuffle") {
       const p = manager.get(msg.guildId);
       if (!p) return msg.reply("❌ Không có nhạc");
       p.shuffle();
       msg.reply("🔀 Xáo").catch(() => {});
-    }
-
-    // AUTOPLAY
-    else if (cmd === "autoplay") {
+    } else if (cmd === "autoplay") {
       const p = manager.get(msg.guildId);
       if (!p) return msg.reply("❌ Không có nhạc");
       try {
@@ -380,10 +330,7 @@ client.on("messageCreate", async (msg) => {
       } catch (e) {
         msg.reply("❌ " + e.message).catch(() => {});
       }
-    }
-
-    // SEARCH
-    else if (cmd === "search") {
+    } else if (cmd === "search") {
       const q = args.join(" ");
       if (!q) return msg.reply("❌ `/search <bài hát>`");
       try {
@@ -403,10 +350,7 @@ client.on("messageCreate", async (msg) => {
       } catch (e) {
         msg.reply(`❌ ${e.message}`).catch(() => {});
       }
-    }
-
-    // HELP
-    else if (cmd === "help" || cmd === "h") {
+    } else if (cmd === "help" || cmd === "h") {
       const embed = new EmbedBuilder()
         .setColor("#FF0000")
         .setTitle("🎵 BOT NHẠC")
@@ -439,9 +383,7 @@ client.on("messageCreate", async (msg) => {
         })
         .setFooter({ text: "🎤 Lyrics: Cập nhật tự động khi phát bài" });
       msg.reply({ embeds: [embed] }).catch(() => {});
-    }
-
-    else {
+    } else {
       msg.reply("❌ `/help`").catch(() => {});
     }
   } catch (error) {
