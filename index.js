@@ -1,8 +1,8 @@
 require("dotenv").config();
 const http = require("http");
-const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin, TTSPlugin } = require("@ziplayer/plugin");
+const { YouTubePlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
 const { voiceExt, lyricsExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH ---
@@ -26,7 +26,7 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS ---
+// --- CẤU HÌNH PLUGINS ỔN ĐỊNH ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
 	new SpotifyPlugin(),
@@ -39,12 +39,6 @@ const plugins = [
 		},
 	}),
 ];
-
-try {
-	plugins.push(new SoundCloudPlugin());
-} catch (e) {
-	console.warn("⚠️ SoundCloudPlugin bypass:", e.message);
-}
 
 const lrc = new lyricsExt({ includeSynced: true, autoFetchOnTrackStart: true, sanitizeTitle: true });
 const voice = new voiceExt({ lang: "vi-VN" });
@@ -89,18 +83,18 @@ manager.on("trackStart", (player, track) => {
 const commands = [
 	new SlashCommandBuilder()
 		.setName("play")
-		.setDescription("Phát nhạc từ YouTube, Spotify hoặc SoundCloud")
+		.setDescription("Phát nhạc từ YouTube hoặc Spotify")
 		.addStringOption(opt => opt.setName("query").setDescription("Tên bài hát hoặc URL").setRequired(true)),
 	new SlashCommandBuilder().setName("skip").setDescription("Bỏ qua bài hát hiện tại"),
 	new SlashCommandBuilder().setName("stop").setDescription("Dừng nhạc và rời kênh"),
 	new SlashCommandBuilder().setName("clarity").setDescription("Bật bộ lọc âm thanh Clarity (Treble Boost)"),
 ].map(cmd => cmd.toJSON());
 
-client.once("ready", async () => {
-	console.log(`🤖 Bot online: ${client.user.tag}`);
+client.once(Events.ClientReady, async (readyClient) => {
+	console.log(`🤖 Bot online: ${readyClient.user.tag}`);
 	const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 	try {
-		await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+		await rest.put(Routes.applicationCommands(readyClient.user.id), { body: commands });
 		console.log("✅ Đã cập nhật Slash Commands thành công!");
 	} catch (error) {
 		console.error("❌ Lỗi Slash Commands:", error);
@@ -108,7 +102,7 @@ client.once("ready", async () => {
 });
 
 // --- XỬ LÝ SLASH COMMANDS ---
-client.on("interactionCreate", async (interaction) => {
+client.on(Events.InteractionCreate, async (interaction) => {
 	if (!interaction.isChatInputCommand()) return;
 
 	try {
@@ -141,7 +135,7 @@ client.on("interactionCreate", async (interaction) => {
 			const res = await player.play(query, interaction.user.id);
 			
 			if (!res || (res.title === "Unknown title" && !res.url)) {
-				return interaction.editReply("❌ YouTube chặn stream trên IP này. Hãy thử dán **link Spotify** hoặc **SoundCloud**!");
+				return interaction.editReply("❌ YouTube chặn stream trên IP này. Hãy thử dán **link Spotify**!");
 			}
 
 			if (player.currentTrack) {
