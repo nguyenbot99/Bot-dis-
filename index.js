@@ -6,7 +6,7 @@ const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin, TTSPlugin, InfinityPlugi
 const { voiceExt, lyricsExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH ---
-process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err.message));
+process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
 process.on("unhandledRejection", (reason) => console.error("⚠️ Unhandled Rejection:", reason));
 
 // --- WEB SERVER KEEP-ALIVE ---
@@ -26,9 +26,7 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-const lrc = new lyricsExt(null, { includeSynced: true, autoFetchOnTrackStart: true, sanitizeTitle: true });
-const voice = new voiceExt(null, { client, lang: "vi-VN" });
-
+// --- TỐI ƯU CẤU HÌNH PLUGIN & EXTENSION ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
 	new SpotifyPlugin(),
@@ -48,6 +46,10 @@ try {
 } catch (e) {
 	console.warn("⚠️ SoundCloudPlugin bypass:", e.message);
 }
+
+// KHỞI TẠO EXTENSION ĐÚNG CÁCH (Không truyền null)
+const lrc = new lyricsExt({ includeSynced: true, autoFetchOnTrackStart: true, sanitizeTitle: true });
+const voice = new voiceExt({ lang: "vi-VN" });
 
 const manager = new PlayerManager({
 	plugins: plugins,
@@ -85,7 +87,7 @@ manager.on("trackStart", (player, track) => {
 	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
 });
 
-// --- SLASH COMMANDS DANH SÁCH ---
+// --- SLASH COMMANDS ---
 const commands = [
 	new SlashCommandBuilder()
 		.setName("play")
@@ -100,8 +102,9 @@ client.once("ready", async () => {
 	console.log(`🤖 Bot online: ${client.user.tag}`);
 	const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 	try {
+		// Đăng ký lệnh ngay lập tức cho toàn bộ Server bot tham gia
 		await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-		console.log("✅ Đã cập nhật Slash Commands!");
+		console.log("✅ Đã đăng ký thành công Slash Commands!");
 	} catch (error) {
 		console.error("❌ Lỗi Slash Commands:", error);
 	}
@@ -111,6 +114,7 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
 	if (!interaction.isChatInputCommand()) return;
 
+	// BÁO DISCORD BOT ĐANG XỬ LÝ (Tránh bị Timeout 3 giây)
 	try {
 		await interaction.deferReply();
 	} catch (e) {
@@ -131,10 +135,10 @@ client.on("interactionCreate", async (interaction) => {
 				player = await manager.create(guild.id, {
 					userdata: { channel },
 					selfDeaf: true,
-					extensions: ["lyricsExt", "voiceExt"],
 				});
 			}
 
+			// Đảm bảo kết nối Voice hoàn tất
 			if (!player.connection) {
 				await player.connect(member.voice.channel);
 			}
@@ -145,7 +149,7 @@ client.on("interactionCreate", async (interaction) => {
 				return interaction.editReply("❌ YouTube chặn stream trên IP này. Hãy thử dán **link Spotify** hoặc **SoundCloud**!");
 			}
 
-			// Lưu ID người yêu cầu bài hát
+			// Lưu lại người yêu cầu bài hát
 			if (player.currentTrack) {
 				player.currentTrack.requestedBy = interaction.user.id;
 			}
@@ -163,7 +167,7 @@ client.on("interactionCreate", async (interaction) => {
 			return interaction.editReply("❌ Không có nhạc đang phát!");
 		}
 
-		// Kiểm tra người yêu cầu bài hát
+		// Kiểm tra quyền chỉ người gọi bài mới skip được
 		const currentTrack = player.currentTrack;
 		if (currentTrack.requestedBy && currentTrack.requestedBy !== interaction.user.id) {
 			return interaction.editReply("🔒 Chỉ người yêu cầu bài hát này mới có quyền skip!");
@@ -178,7 +182,7 @@ client.on("interactionCreate", async (interaction) => {
 			return interaction.editReply("❌ Bot chưa ở trong kênh!");
 		}
 
-		// Kiểm tra người yêu cầu bài hát hiện tại
+		// Kiểm tra quyền chỉ người gọi bài mới stop được
 		const currentTrack = player.currentTrack;
 		if (currentTrack && currentTrack.requestedBy && currentTrack.requestedBy !== interaction.user.id) {
 			return interaction.editReply("🔒 Chỉ người yêu cầu bài hát hiện tại mới có quyền stop!");
