@@ -2,7 +2,7 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { YouTubePlugin, SoundCloudPlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
+const { YouTubePlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
 const { voiceExt, lyricsExt, lavalinkExt } = require("@ziplayer/extension");
 
 // --- 1. WEB SERVER KEEP-ALIVE CHO RENDER FREE ---
@@ -40,19 +40,16 @@ const lavalink = new lavalinkExt(null, {
 		},
 	],
 	client: client,
-	searchPrefix: "scsearch",
+	searchPrefix: "scsearch", // Vẫn hỗ trợ tìm kiếm SoundCloud thông qua Lavalink an toàn
 });
 
 const voice = new voiceExt(null, { client, lang: "vi-VN" });
 
-// --- 4. PLAYER MANAGER SETUP ---
+// --- 4. PLAYER MANAGER SETUP (ĐÃ ĐIỀU CHỈNH) ---
 const manager = new PlayerManager({
 	plugins: [
 		new TTSPlugin({ defaultLang: "vi" }),
 		new YouTubePlugin(),
-		new SoundCloudPlugin({
-			clientId: "iZ29y3TWP72qogVFi2a1Lz33xI4oA1yK",
-		}),
 		new SpotifyPlugin(),
 	],
 	extensions: [lrc, voice, lavalink],
@@ -103,7 +100,7 @@ manager.on("voiceCreate", async (player, evt) => {
 const commands = [
 	new SlashCommandBuilder()
 		.setName("play")
-		.setDescription("Phát bài hát từ URL hoặc từ khóa")
+		.setDescription("Phát bài hát từ URL hoặc từ khóa (YouTube/Spotify)")
 		.addStringOption(opt => opt.setName("query").setDescription("Tên bài hát hoặc liên kết").setRequired(true)),
 	new SlashCommandBuilder()
 		.setName("tts")
