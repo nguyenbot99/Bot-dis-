@@ -21,6 +21,7 @@ const client = new Client({
 		GatewayIntentBits.GuildMessages,
 		GatewayIntentBits.GuildVoiceStates,
 		GatewayIntentBits.GuildMembers,
+		GatewayIntentBits.MessageContent, // Thêm Intent đọc nội dung tin nhắn
 	],
 	partials: [Partials.Channel],
 });
@@ -28,13 +29,12 @@ const client = new Client({
 const lrc = new lyricsExt(null, { includeSynced: true, autoFetchOnTrackStart: true, sanitizeTitle: true });
 const voice = new voiceExt(null, { client, lang: "vi-VN" });
 
-// --- TỐI ƯU PLUGIN DANH SÁCH PHÁT ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
 	new SpotifyPlugin(),
-	new InfinityPlugin(), // Hỗ trợ YouTube qua REST API
+	new InfinityPlugin(),
 	new YouTubePlugin({
-		playerClients: ["TVHTML5", "ANDROID", "IOS"], // Đổi Client vượt rào cản IP
+		playerClients: ["TVHTML5", "ANDROID", "IOS"],
 		fetchOptions: {
 			headers: {
 				"User-Agent": "Mozilla/5.0 (SmartTV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.93 TV Safari/537.36",
@@ -62,11 +62,6 @@ manager.on("trackStart", (player, track) => {
 	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
 });
 
-manager.on("queueAdd", (player, track) => {
-	const title = track?.title || track?.name || "Bài hát";
-	player.userdata?.channel?.send(`✅ Đã thêm vào hàng đợi: **${title}**`).catch(() => null);
-});
-
 // --- SLASH COMMANDS ---
 const commands = [
 	new SlashCommandBuilder()
@@ -88,15 +83,25 @@ client.once("ready", async () => {
 	}
 });
 
+// --- XỬ LÝ SLASH COMMANDS ---
 client.on("interactionCreate", async (interaction) => {
 	if (!interaction.isChatInputCommand()) return;
+
+	// BÁO CHO DISCORD BIẾT BOT ĐANG XỬ LÝ NGHAY LẬP TỨC (Tránh lỗi không phản hồi)
+	try {
+		await interaction.deferReply();
+	} catch (e) {
+		return;
+	}
+
 	const { commandName, options, member, guild, channel } = interaction;
 
 	if (commandName === "play") {
 		const query = options.getString("query");
-		if (!member.voice.channel) return interaction.reply({ content: "❌ Vào voice channel trước!", flags: 64 });
+		if (!member?.voice?.channel) {
+			return interaction.editReply("❌ Bạn phải vào voice channel trước!");
+		}
 
-		await interaction.deferReply();
 		try {
 			let player = manager.get(guild.id);
 			if (!player) {
@@ -107,30 +112,36 @@ client.on("interactionCreate", async (interaction) => {
 				});
 			}
 
-			if (!player.connection) await player.connect(member.voice.channel);
+			if (!player.connection) {
+				await player.connect(member.voice.channel);
+			}
 
 			const res = await player.play(query, interaction.user.id);
 			
-			// Kiểm tra nếu bài hát lấy về bị rỗng dữ liệu
 			if (!res || (res.title === "Unknown title" && !res.url)) {
-				await interaction.editReply("❌ YouTube chặn stream trên IP này. Hãy thử dán **link Spotify** hoặc **SoundCloud**!");
-				return;
+				return interaction.editReply("❌ YouTube chặn stream trên IP này. Hãy thử dán **link Spotify** hoặc **SoundCloud**!");
 			}
 
 			const title = res.title || res.name || query;
-			await interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
+			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
-			await interaction.editReply("❌ Lỗi lấy stream nhạc. Vui lòng dùng link Spotify!");
+			return interaction.editReply("❌ Lỗi lấy stream nhạc. Vui lòng dùng link Spotify!");
 		}
 	} else if (commandName === "skip") {
 		const player = manager.get(guild.id);
-		if (player) player.skip();
-		interaction.reply("⏭️ Đã skip!");
+		if (player) {
+			player.skip();
+			return interaction.editReply("⏭️ Đã skip!");
+		}
+		return interaction.editReply("❌ Không có nhạc đang phát!");
 	} else if (commandName === "stop") {
 		const player = manager.get(guild.id);
-		if (player) player.destroy();
-		interaction.reply("👋 Đã ngắt kết nối!");
+		if (player) {
+			player.destroy();
+			return interaction.editReply("👋 Đã ngắt kết nối!");
+		}
+		return interaction.editReply("❌ Bot chưa ở trong kênh!");
 	}
 });
 
