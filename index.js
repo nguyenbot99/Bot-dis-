@@ -26,15 +26,17 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS ---
+// --- CẤU HÌNH PLUGINS TỐI ƯU BYPASS IP BLOCK ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
-	new SpotifyPlugin(),
+	new SpotifyPlugin({
+		emitError: false,
+	}),
 	new YouTubePlugin({
-		playerClients: ["WEB_CREATOR", "TVHTML5", "ANDROID", "IOS"],
+		playerClients: ["ANDROID", "IOS", "TVHTML5"],
 		fetchOptions: {
 			headers: {
-				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+				"User-Agent": "com.google.android.youtube/17.36.37 (Linux; U; Android 12; gts7xl)",
 			},
 		},
 	}),
@@ -119,7 +121,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	// --- 1. PLAYBACK ---
 	if (commandName === "play" || commandName === "search") {
-		const query = options.getString("query");
+		let query = options.getString("query");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
 
 		try {
@@ -128,15 +130,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			}
 			if (!player.connection) await player.connect(member.voice.channel);
 
-			const res = await player.play(query, user.id);
-			if (!res) return interaction.editReply("❌ Không tìm thấy bài hát hoặc lỗi nguồn phát!");
-			
+			let res;
+			try {
+				// Thử phát trực tiếp
+				res = await player.play(query, user.id);
+			} catch (playErr) {
+				// Nếu lỗi do YouTube IP block, tự động chuyển đổi sang tìm kiếm bài hát trên nền tảng khác
+				if (query.includes("youtube.com") || query.includes("youtu.be")) {
+					const cleanQuery = query.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
+					res = await player.play(`spsearch:${cleanQuery}`, user.id);
+				} else {
+					res = await player.play(`spsearch:${query}`, user.id);
+				}
+			}
+
+			if (!res) {
+				// Mẹo Dự phòng Cuối cùng: Chuyển hướng sang Spotify Search
+				res = await player.play(`spsearch:${query}`, user.id);
+			}
+
+			if (!res) return interaction.editReply("❌ Không thể lấy nguồn stream nhạc! Hãy thử nhập **tên bài hát** thay vì link YouTube.");
+
 			if (player.currentTrack) player.currentTrack.requestedBy = user.id;
 			const title = res.title || res.name || query;
 			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
-			return interaction.editReply("❌ Lỗi lấy stream nhạc. Vui lòng thử dán link Spotify!");
+			return interaction.editReply("❌ Lỗi server stream. Hãy thử gõ **Tên bài hát** (Ví dụ: `/play Sơn Tùng M-TP`) thay vì dán link YouTube nhé!");
 		}
 
 	} else if (commandName === "tts") {
