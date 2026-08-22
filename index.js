@@ -31,19 +31,35 @@ const lrc = new lyricsExt(null, {
 
 const voice = new voiceExt(null, { client, lang: "vi-VN" });
 
-// --- 4. PLAYER MANAGER SETUP ---
+// --- 4. TẠO DANH SÁCH PLUGIN AN TOÀN (YOUTUBE + SPOTIFY + SOUNDCLOUD) ---
+const plugins = [new TTSPlugin({ defaultLang: "vi" }), new SpotifyPlugin()];
+
+// Khởi tạo SoundCloud an toàn (tránh crash do Render bị block IP)
+try {
+	plugins.push(new SoundCloudPlugin());
+} catch (e) {
+	console.warn("⚠️ Khởi tạo SoundCloudPlugin thất bại, chuyển sang chế độ dự phòng:", e.message);
+}
+
+// Khởi tạo YouTube
+plugins.push(
+	new YouTubePlugin({
+		fetchOptions: {
+			headers: {
+				"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+			},
+		},
+	})
+);
+
+// --- 5. PLAYER MANAGER SETUP ---
 const manager = new PlayerManager({
-	plugins: [
-		new TTSPlugin({ defaultLang: "vi" }),
-		new SoundCloudPlugin(),
-		new SpotifyPlugin(),
-		new YouTubePlugin(),
-	],
+	plugins: plugins,
 	extensions: [lrc, voice],
 	autoCleanup: true,
 });
 
-// --- 5. EVENT LISTENERS ---
+// --- 6. EVENT LISTENERS ---
 manager.on("trackStart", (player, track) => {
 	const title = track?.title || track?.name || "Bài hát không tên";
 	player.userdata?.channel?.send(`▶ Đang phát: **${title}**`).catch(() => null);
@@ -65,7 +81,7 @@ manager.on("lyricsChange", async (player, track, result) => {
 	}
 });
 
-// Nhận diện giọng nói (Voice Control)
+// Voice Control
 manager.on("voiceCreate", async (player, evt) => {
 	const text = evt.content.toLowerCase();
 	const channel = player.userdata?.channel;
@@ -85,11 +101,11 @@ manager.on("voiceCreate", async (player, evt) => {
 	}
 });
 
-// --- 6. KHAI BÁO SLASH COMMANDS ---
+// --- 7. KHAI BÁO SLASH COMMANDS ---
 const commands = [
 	new SlashCommandBuilder()
 		.setName("play")
-		.setDescription("Phát bài hát từ URL hoặc từ khóa")
+		.setDescription("Phát nhạc từ YouTube, Spotify hoặc SoundCloud")
 		.addStringOption(opt => opt.setName("query").setDescription("Tên bài hát hoặc liên kết").setRequired(true)),
 	new SlashCommandBuilder()
 		.setName("tts")
@@ -113,7 +129,7 @@ const commands = [
 	new SlashCommandBuilder().setName("clearfilters").setDescription("Xóa toàn bộ hiệu ứng âm thanh"),
 ].map(cmd => cmd.toJSON());
 
-// --- 7. REGISTER COMMANDS & READY EVENT ---
+// --- 8. REGISTER COMMANDS & READY EVENT ---
 client.once("ready", async () => {
 	console.log(`🤖 Bot đã đăng nhập thành công: ${client.user.tag}`);
 
@@ -127,7 +143,7 @@ client.once("ready", async () => {
 	}
 });
 
-// --- 8. SLASH COMMAND INTERACTION HANDLER ---
+// --- 9. INTERACTION HANDLER ---
 client.on("interactionCreate", async (interaction) => {
 	if (!interaction.isChatInputCommand()) return;
 
@@ -164,17 +180,17 @@ client.on("interactionCreate", async (interaction) => {
 
 					const res = await player.play(query, interaction.user.id);
 					
-					let songTitle = "Bài hát";
+					let songTitle = query;
 					if (res && typeof res === "object") {
 						songTitle = res.title || res.name || res.tracks?.[0]?.title || query;
 					} else if (player.currentTrack) {
 						songTitle = player.currentTrack.title || player.currentTrack.name || query;
 					}
 
-					await interaction.editReply(`🔎 Đã xử lý phát nhạc cho: **${songTitle}**`);
+					await interaction.editReply(`🔎 Đã thêm vào hàng đợi: **${songTitle}**`);
 				} catch (err) {
-					console.error("Lỗi khi phát nhạc:", err);
-					await interaction.editReply("❌ YouTube đang chặn kết nối từ server Render! Hãy dán link nhạc từ Spotify hoặc SoundCloud để phát.");
+					console.error("Lỗi khi tìm/phát nhạc:", err);
+					await interaction.editReply("❌ Không thể lấy dữ liệu phát bài hát này. Bạn hãy thử dán link trực tiếp từ Spotify hoặc SoundCloud!");
 				}
 				break;
 			}
