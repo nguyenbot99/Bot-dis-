@@ -2,7 +2,7 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits, Partials, REST, Routes, SlashCommandBuilder, Events, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
-const { YouTubePlugin, SpotifyPlugin, TTSPlugin } = require("@ziplayer/plugin");
+const { YouTubePlugin, SpotifyPlugin, SoundCloudPlugin, TTSPlugin } = require("@ziplayer/plugin");
 const { voiceExt, lyricsExt } = require("@ziplayer/extension");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH ---
@@ -26,19 +26,13 @@ const client = new Client({
 	partials: [Partials.Channel],
 });
 
-// --- CẤU HÌNH PLUGINS TỐI ƯU BYPASS IP BLOCK ---
+// --- CẤU HÌNH PLUGINS (Ưu tiên SoundCloud & Spotify) ---
 const plugins = [
 	new TTSPlugin({ defaultLang: "vi" }),
-	new SpotifyPlugin({
-		emitError: false,
-	}),
+	new SoundCloudPlugin(),
+	new SpotifyPlugin(),
 	new YouTubePlugin({
-		playerClients: ["ANDROID", "IOS", "TVHTML5"],
-		fetchOptions: {
-			headers: {
-				"User-Agent": "com.google.android.youtube/17.36.37 (Linux; U; Android 12; gts7xl)",
-			},
-		},
+		playerClients: ["IOS", "ANDROID"],
 	}),
 ];
 
@@ -121,7 +115,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 	// --- 1. PLAYBACK ---
 	if (commandName === "play" || commandName === "search") {
-		let query = options.getString("query");
+		let rawQuery = options.getString("query");
 		if (!member?.voice?.channel) return interaction.editReply("❌ Bạn phải vào Voice Channel trước!");
 
 		try {
@@ -130,33 +124,36 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			}
 			if (!player.connection) await player.connect(member.voice.channel);
 
-			let res;
-			try {
-				// Thử phát trực tiếp
-				res = await player.play(query, user.id);
-			} catch (playErr) {
-				// Nếu lỗi do YouTube IP block, tự động chuyển đổi sang tìm kiếm bài hát trên nền tảng khác
-				if (query.includes("youtube.com") || query.includes("youtu.be")) {
-					const cleanQuery = query.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
-					res = await player.play(`spsearch:${cleanQuery}`, user.id);
-				} else {
-					res = await player.play(`spsearch:${query}`, user.id);
+			let res = null;
+
+			// Nếu là link YouTube bị khoá, chuyển hướng sang SoundCloud/Spotify
+			if (rawQuery.includes("youtube.com") || rawQuery.includes("youtu.be")) {
+				const searchQuery = rawQuery.replace(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/(watch\?v=)?/, "").split("&")[0];
+				try {
+					res = await player.play(`scsearch:${searchQuery}`, user.id);
+				} catch (e) {
+					res = await player.play(`spsearch:${searchQuery}`, user.id);
 				}
+			} else if (!rawQuery.startsWith("http")) {
+				// Nếu người dùng nhập tên bài hát, tìm kiếm trực tiếp trên SoundCloud để bypass IP YouTube
+				try {
+					res = await player.play(`scsearch:${rawQuery}`, user.id);
+				} catch (e) {
+					res = await player.play(rawQuery, user.id);
+				}
+			} else {
+				// Các trường hợp link khác (Spotify, SoundCloud, TTS...)
+				res = await player.play(rawQuery, user.id);
 			}
 
-			if (!res) {
-				// Mẹo Dự phòng Cuối cùng: Chuyển hướng sang Spotify Search
-				res = await player.play(`spsearch:${query}`, user.id);
-			}
-
-			if (!res) return interaction.editReply("❌ Không thể lấy nguồn stream nhạc! Hãy thử nhập **tên bài hát** thay vì link YouTube.");
+			if (!res) return interaction.editReply("❌ Không tìm thấy bài hát phù hợp!");
 
 			if (player.currentTrack) player.currentTrack.requestedBy = user.id;
-			const title = res.title || res.name || query;
+			const title = res.title || res.name || rawQuery;
 			return interaction.editReply(`🔎 Đã xử lý yêu cầu phát: **${title}**`);
 		} catch (err) {
 			console.error("Play Error:", err);
-			return interaction.editReply("❌ Lỗi server stream. Hãy thử gõ **Tên bài hát** (Ví dụ: `/play Sơn Tùng M-TP`) thay vì dán link YouTube nhé!");
+			return interaction.editReply("❌ Không thể lấy nguồn audio. Bạn vui lòng dùng link Spotify hoặc tìm tên bài hát nhé!");
 		}
 
 	} else if (commandName === "tts") {
@@ -234,7 +231,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 		player.destroy();
 		return interaction.editReply("👋 Đã rời khỏi kênh thoại!");
 
-	// --- 4. HELP MENU (ĐÃ VIỆT HÓA CHÚ THÍCH) ---
+	// --- 4. HELP MENU ---
 	} else if (commandName === "help") {
 		const embed = new EmbedBuilder()
 			.setColor("#3498db")
