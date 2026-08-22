@@ -93,7 +93,7 @@ manager.on("filtersCleared", (player) => {
 const commands = [
 	// Playback
 	new SlashCommandBuilder().setName("play").setDescription("Phát bài hát từ link hoặc từ khóa").addStringOption(o => o.setName("query").setDescription("Tên bài hát/URL").setRequired(true)),
-	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
+	new SlashCommandBuilder().setName("tts").setDescription("Đọc văn bản bằng giọng nói (chỉ riêng bạn thấy)").addStringOption(o => o.setName("text").setDescription("Nội dung cần đọc").setRequired(true)),
 	new SlashCommandBuilder().setName("skip").setDescription("Bỏ qua bài hát hiện tại"),
 	new SlashCommandBuilder().setName("pause").setDescription("Tạm dừng phát nhạc"),
 	new SlashCommandBuilder().setName("resume").setDescription("Tiếp tục phát nhạc"),
@@ -140,9 +140,19 @@ client.once(Events.ClientReady, async (readyClient) => {
 client.on(Events.InteractionCreate, async (interaction) => {
 	if (!interaction.isChatInputCommand()) return;
 
-	try { await interaction.deferReply(); } catch (e) { return; }
-
 	const { commandName, options, member, guild, channel, user } = interaction;
+
+	// Xử lý hoãn phản hồi (Ephemeral riêng cho TTS, công khai cho các lệnh còn lại)
+	try {
+		if (commandName === "tts") {
+			await interaction.deferReply({ flags: 64 }); // Ẩn tin nhắn phản hồi chỉ cho riêng người dùng
+		} else {
+			await interaction.deferReply();
+		}
+	} catch (e) {
+		return;
+	}
+
 	let player = manager.get(guild.id);
 
 	// --- 1. PLAYBACK ---
@@ -321,7 +331,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 			.setDescription(
 				"**Phát Nhạc (Playback)**\n" +
 				"`/play <query>` - Phát bài hát từ từ khóa hoặc link\n" +
-				"`/tts <text>` - Đọc văn bản bằng giọng nói\n" +
+				"`/tts <text>` - Đọc văn bản bằng giọng nói (chỉ riêng bạn thấy)\n" +
 				"`/skip` - Bỏ qua bài hát đang phát\n" +
 				"`/pause` - Tạm dừng phát nhạc\n" +
 				"`/resume` - Tiếp tục phát nhạc\n" +
