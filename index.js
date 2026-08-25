@@ -14,7 +14,7 @@ const {
 } = require("discord.js");
 const { PlayerManager } = require("ziplayer");
 const { lavalinkExt } = require("@ziplayer/extension");
-const { TTSPlugin } = require("@ziplayer/plugin"); // Tích hợp Plugin TTS chuẩn ZiPlayer[span_4](start_span)[span_4](end_span)
+const { TTSPlugin, SoundCloudPlugin } = require("@ziplayer/plugin");
 
 // --- BẮT LỖI TOÀN CỤC CHỐNG CRASH BOT ---
 process.on("uncaughtException", (err) => console.error("⚠️ Uncaught Exception:", err));
@@ -55,9 +55,12 @@ const lavalink = new lavalinkExt(null, {
 	debug: false,
 });
 
-// Thêm TTSPlugin vào danh sách plugins[span_5](start_span)[span_5](end_span)
+// Khởi tạo PlayerManager chuẩn hóa các Plugins
 const manager = new PlayerManager({
-	plugins: [new TTSPlugin({ defaultLanguage: "vi" })],[span_6](start_span)[span_6](end_span)
+	plugins: [
+		new SoundCloudPlugin(),
+		new TTSPlugin({ defaultLanguage: "vi" })
+	],
 	extensions: [lavalink],
 	autoCleanup: true,
 	extractorTimeout: 90000,
@@ -183,7 +186,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 			if (!player.connection) await player.connect(voiceChannel);
 
-			// Sử dụng tiền tố tts: trực tiếp với ZiPlayer Manager[span_7](start_span)[span_7](end_span)
 			const success = await player.play(`tts:${text}`, user.id);
 
 			if (!success) {
