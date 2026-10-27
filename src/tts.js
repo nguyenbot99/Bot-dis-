@@ -183,11 +183,8 @@ class TtsProvider {
       // web TTS không dùng được, tiếp tục
     }
 
-    // Fallback: beep
-    return {
-      type: 'pcm',
-      buffer: createBeepPcm(),
-    };
+    // Không có nguồn TTS nào khả dụng — ném lỗi rõ ràng
+    throw new Error('Không có nguồn TTS khả dụng. Vui lòng cài espeak-ng trên hệ thống hoặc kiểm tra kết nối mạng.');
   }
 }
 

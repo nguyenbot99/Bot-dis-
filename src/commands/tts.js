@@ -4,6 +4,7 @@
  */
 
 const { EmbedBuilder } = require('discord.js');
+const { entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 
 module.exports = {
   name: 'tts',
@@ -51,6 +52,8 @@ module.exports = {
       // Kết nối voice nếu chưa kết nối
       if (!player.connection) {
         player.connect(voiceChannel);
+        // Đợi kết nối voice sẵn sàng trước khi phát TTS
+        await entersState(player.connection, VoiceConnectionStatus.Ready, 15e3);
       }
 
       // Phát TTS (gián đoạn bài nhạc hiện tại nếu có)

@@ -4,6 +4,7 @@ FROM node:20-slim
 # Cài ffmpeg (bắt buộc cho @discordjs/voice phát âm thanh trong voice channel)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    espeak-ng \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
