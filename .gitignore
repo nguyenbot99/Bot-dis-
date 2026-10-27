@@ -1,0 +1,9 @@
+node_modules/
+.cache/
+.npm/
+.env
+.env.local
+package-lock.json
+npm-debug.log*
+.DS_Store
+.gitconfig
