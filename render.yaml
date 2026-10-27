@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: ziplayer-music-bot
+    env: docker
+    dockerfile: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: GUILD_ID
+        sync: false
+      - key: PORT
+        value: 3000

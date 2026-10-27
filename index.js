@@ -7,6 +7,7 @@
 const { Client, GatewayIntentBits, Events, Partials } = require('discord.js');
 const { PlayerManager } = require('./src/player');
 const { commands, commandMap } = require('./src/commands');
+const { server } = require('./server');
 
 require('dotenv').config();
 
@@ -84,6 +85,7 @@ client.login(token).catch((error) => {
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('[Bot] Đang tắt...');
+  server.close(() => console.log('[Keep-alive] Express server closed.'));
   for (const [guildId, player] of manager.players) {
     player.destroy();
   }
@@ -93,6 +95,7 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
   console.log('[Bot] Nhận SIGTERM, đang tắt...');
+  server.close(() => console.log('[Keep-alive] Express server closed.'));
   for (const [guildId, player] of manager.players) {
     player.destroy();
   }
