@@ -1,17 +1,24 @@
 # Dockerfile cho ZiPlayer Music Bot trên Render
 FROM node:20-slim
 
-# Cài ffmpeg (bắt buộc cho @discordjs/voice phát âm thanh trong voice channel)
+# Cài hệ thống cần thiết:
+# - ffmpeg: decode âm thanh cho @discordjs/voice
+# - espeak-ng: nguồn TTS thật cho lệnh /tts
+# - build-essential, python3, make, g++: biên dịch native module @discordjs/opus
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     espeak-ng \
     ca-certificates \
+    build-essential \
+    python3 \
+    make \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy file định nghĩa dependencies trước để tận dụng layer cache
-COPY package.json package-lock.json* ./
+COPY package.json ./
 
 RUN npm install --omit=dev
 
