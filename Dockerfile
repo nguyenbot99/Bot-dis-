@@ -24,6 +24,7 @@ RUN npm install --omit=dev
 
 # Copy source code
 COPY index.js ./
+COPY server.js ./
 COPY src ./src
 COPY .env.example ./
 
